@@ -10,6 +10,162 @@
     
     <!-- Custom CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+    
+    <style>
+        /* Trade Modal Styles */
+        .trade-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 10000;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .trade-modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            width: 90%;
+            max-width: 500px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+        }
+        
+        .trade-modal h2 {
+            color: #34495e;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #34495e;
+            font-weight: 600;
+        }
+        
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ecf0f1;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.2s;
+        }
+        
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+        
+        .trade-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 25px;
+        }
+        
+        .trade-buttons button {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .btn-buy {
+            background: #27ae60;
+            color: white;
+        }
+        
+        .btn-buy:hover {
+            background: #229954;
+            transform: translateY(-2px);
+        }
+        
+        .btn-sell {
+            background: #e74c3c;
+            color: white;
+        }
+        
+        .btn-sell:hover {
+            background: #c0392b;
+            transform: translateY(-2px);
+        }
+        
+        .btn-cancel {
+            background: #95a5a6;
+            color: white;
+        }
+        
+        .btn-cancel:hover {
+            background: #7f8c8d;
+        }
+        
+        /* Trade button (hidden by default) */
+        .admin-trade-btn {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            width: 60px;
+            height: 60px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            font-size: 24px;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            transition: all 0.3s;
+            display: none; /* Hidden by default */
+            z-index: 1000;
+        }
+        
+        .admin-trade-btn:hover {
+            transform: scale(1.1);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+        }
+        
+        .admin-trade-btn.visible {
+            display: block;
+        }
+        
+        .success-message {
+            background: #27ae60;
+            color: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: none;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .price-info {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 8px;
+            margin-top: 10px;
+            font-size: 14px;
+            color: #7f8c8d;
+        }
+        
+        .price-info strong {
+            color: #2c3e50;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
@@ -23,6 +179,12 @@
         <div id="loading-overlay" class="loading-overlay">
             <div class="spinner"></div>
             <p>Loading portfolio data...</p>
+        </div>
+
+        <!-- Success message -->
+        <div id="success-message" class="success-message">
+            <span>✓</span>
+            <span id="success-text"></span>
         </div>
 
         <!-- Error message -->
@@ -93,7 +255,194 @@
         </footer>
     </div>
 
+    <!-- Floating Trade Button (hidden by default, press 't' 3 times to show) -->
+    <button class="admin-trade-btn" id="trade-btn" onclick="openTradeModal()">💰</button>
+
+    <!-- Trade Modal -->
+    <div class="trade-modal" id="trade-modal">
+        <div class="trade-modal-content">
+            <h2>Execute Trade</h2>
+            
+            <form id="trade-form">
+                <div class="form-group">
+                    <label for="stock-select">Stock</label>
+                    <select id="stock-select" required>
+                        <option value="">Select a stock...</option>
+                        <option value="NVDA">NVDA - NVIDIA</option>
+                        <option value="MSFT">MSFT - Microsoft</option>
+                        <option value="AAPL">AAPL - Apple</option>
+                        <option value="JPM">JPM - JPMorgan Chase</option>
+                        <option value="UNH">UNH - UnitedHealth</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="quantity-input">Quantity (shares)</label>
+                    <input type="number" id="quantity-input" min="1" value="100" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="price-input">Price per Share ($)</label>
+                    <input type="number" id="price-input" step="0.01" min="0.01" required>
+                    <div class="price-info" id="current-price-info" style="display: none;">
+                        Current market price: <strong id="market-price">--</strong>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="note-input">Note (optional)</label>
+                    <input type="text" id="note-input" placeholder="Trade reason...">
+                </div>
+                
+                <div class="trade-buttons">
+                    <button type="button" class="btn-buy" onclick="executeTrade('BUY')">🟢 BUY</button>
+                    <button type="button" class="btn-sell" onclick="executeTrade('SELL')">🔴 SELL</button>
+                    <button type="button" class="btn-cancel" onclick="closeTradeModal()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Custom JavaScript -->
     <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+    
+    <script>
+        // Secret key combination to show trade button (press 't' 3 times quickly)
+        let tPresses = 0;
+        let tTimer = null;
+        
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 't' || e.key === 'T') {
+                tPresses++;
+                
+                if (tPresses === 3) {
+                    document.getElementById('trade-btn').classList.add('visible');
+                    showSuccess('Trade button activated! 💰');
+                    tPresses = 0;
+                }
+                
+                clearTimeout(tTimer);
+                tTimer = setTimeout(() => {
+                    tPresses = 0;
+                }, 1000);
+            }
+        });
+        
+        // Store current prices globally
+        let currentPrices = {};
+        
+        // Update the loadPortfolio function to store prices
+        const originalLoadPortfolio = loadPortfolio;
+        loadPortfolio = async function() {
+            await originalLoadPortfolio();
+            
+            // Fetch and store current prices
+            try {
+                const response = await fetch('/api/portfolio');
+                const data = await response.json();
+                
+                data.holdings.forEach(h => {
+                    currentPrices[h.ticker] = h.price;
+                });
+            } catch (error) {
+                console.error('Error loading prices:', error);
+            }
+        };
+        
+        function openTradeModal() {
+            document.getElementById('trade-modal').style.display = 'flex';
+        }
+        
+        function closeTradeModal() {
+            document.getElementById('trade-modal').style.display = 'none';
+            document.getElementById('trade-form').reset();
+            document.getElementById('current-price-info').style.display = 'none';
+        }
+        
+        // Update price when stock is selected
+        document.getElementById('stock-select').addEventListener('change', function(e) {
+            const ticker = e.target.value;
+            const priceInput = document.getElementById('price-input');
+            const priceInfo = document.getElementById('current-price-info');
+            const marketPrice = document.getElementById('market-price');
+            
+            if (ticker && currentPrices[ticker]) {
+                priceInput.value = currentPrices[ticker].toFixed(2);
+                marketPrice.textContent = `$${currentPrices[ticker].toFixed(2)}`;
+                priceInfo.style.display = 'block';
+            } else {
+                priceInfo.style.display = 'none';
+            }
+        });
+        
+        async function executeTrade(action) {
+            const ticker = document.getElementById('stock-select').value;
+            const quantity = parseInt(document.getElementById('quantity-input').value);
+            const price = parseFloat(document.getElementById('price-input').value);
+            const note = document.getElementById('note-input').value;
+            
+            if (!ticker || !quantity || !price) {
+                showError('Please fill in all required fields');
+                return;
+            }
+            
+            showLoading(true);
+            
+            try {
+                const response = await fetch('/api/trade', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        ticker: ticker,
+                        action: action,
+                        quantity: quantity,
+                        price: price,
+                        note: note || `${action} trade via dashboard`
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showSuccess(`✓ ${action} ${quantity} ${ticker} @ $${price.toFixed(2)} = $${(quantity * price).toFixed(2)}`);
+                    closeTradeModal();
+                    
+                    // Refresh all data after 1 second
+                    setTimeout(() => {
+                        loadAllData();
+                    }, 1000);
+                } else {
+                    showError(data.error || 'Trade failed');
+                }
+                
+            } catch (error) {
+                console.error('Error executing trade:', error);
+                showError('Failed to execute trade: ' + error.message);
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        function showSuccess(message) {
+            const successDiv = document.getElementById('success-message');
+            const successText = document.getElementById('success-text');
+            
+            successText.textContent = message;
+            successDiv.style.display = 'flex';
+            
+            setTimeout(() => {
+                successDiv.style.display = 'none';
+            }, 5000);
+        }
+        
+        // Close modal when clicking outside
+        document.getElementById('trade-modal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeTradeModal();
+            }
+        });
+    </script>
 </body>
 </html>

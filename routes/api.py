@@ -45,6 +45,84 @@ def get_portfolio():
         return jsonify({'error': str(e)}), 500
 
 
+@api_bp.route('/trade', methods=['POST'])
+def execute_trade():
+    """Execute a buy or sell trade"""
+    try:
+        data = request.get_json()
+        
+        # Validate required fields
+        required_fields = ['ticker', 'action', 'quantity', 'price']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({'error': f'Missing required field: {field}'}), 400
+        
+        ticker = data['ticker'].upper()
+        action = data['action'].upper()
+        quantity = int(data['quantity'])
+        price = float(data['price'])
+        note = data.get('note', '')
+        
+        # Validate ticker
+        if ticker not in current_app.config['PORTFOLIO_STOCKS']:
+            return jsonify({'error': f'Invalid ticker: {ticker}'}), 400
+        
+        # Validate action
+        if action not in ['BUY', 'SELL']:
+            return jsonify({'error': f'Invalid action: {action}. Must be BUY or SELL'}), 400
+        
+        # Validate quantity
+        if quantity <= 0:
+            return jsonify({'error': 'Quantity must be positive'}), 400
+        
+        # Validate price
+        if price <= 0:
+            return jsonify({'error': 'Price must be positive'}), 400
+        
+        # Check if we have enough shares to sell
+        if action == 'SELL':
+            pm = current_app.portfolio_manager
+            positions = pm.get_current_positions()
+            
+            if positions[ticker] < quantity:
+                return jsonify({
+                    'error': f'Insufficient shares. You have {positions[ticker]} shares of {ticker}'
+                }), 400
+        
+        # Check if we have enough cash to buy
+        if action == 'BUY':
+            pm = current_app.portfolio_manager
+            cash = pm.get_cash_balance()
+            total_cost = quantity * price
+            
+            if cash < total_cost:
+                return jsonify({
+                    'error': f'Insufficient cash. You have ${cash:,.2f} but need ${total_cost:,.2f}'
+                }), 400
+        
+        # Execute trade
+        pm = current_app.portfolio_manager
+        trade = pm.record_trade(
+            ticker=ticker,
+            action=action,
+            quantity=quantity,
+            price=price,
+            note=note
+        )
+        
+        # Take a snapshot after the trade
+        pm.take_snapshot(note=f"After {action} trade")
+        
+        return jsonify({
+            'success': True,
+            'trade': trade.to_dict(),
+            'message': f'Successfully executed {action} of {quantity} {ticker} @ ${price:.2f}'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @api_bp.route('/trades')
 def get_trades():
     """Get recent trades"""
@@ -155,11 +233,17 @@ def get_all_stocks():
 def get_stats():
     """Get database statistics"""
     try:
+        pm = current_app.portfolio_manager
+        cash = pm.get_cash_balance()
+        positions = pm.get_current_positions()
+        
         return jsonify({
             'total_prices': Price.query.count(),
             'total_trades': Trade.query.count(),
             'total_snapshots': Snapshot.query.count(),
             'stocks_tracked': len(current_app.config['PORTFOLIO_STOCKS']),
+            'current_cash': round(cash, 2),
+            'current_positions': positions,
             'oldest_price': Price.query.order_by(
                 Price.timestamp).first().timestamp.isoformat() if Price.query.count() > 0 else None,
             'latest_price': Price.query.order_by(
