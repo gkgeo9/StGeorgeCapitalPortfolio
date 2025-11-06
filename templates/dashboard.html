@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Investment Club Portfolio Dashboard</title>
+    
+    <!-- Plotly.js for charts -->
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>📊 Investment Club Portfolio</h1>
+            <p class="last-update">Last updated: <span id="last-update-time">Loading...</span></p>
+        </header>
+
+        <!-- Loading overlay -->
+        <div id="loading-overlay" class="loading-overlay">
+            <div class="spinner"></div>
+            <p>Loading portfolio data...</p>
+        </div>
+
+        <!-- Error message -->
+        <div id="error-message" class="error-message" style="display: none;">
+            <span class="error-icon">⚠️</span>
+            <span id="error-text"></span>
+        </div>
+
+        <!-- KPI Cards -->
+        <div class="kpi-container" id="kpi-container">
+            <!-- KPI cards will be dynamically inserted here -->
+        </div>
+
+        <!-- Main Content Grid -->
+        <div class="content-grid">
+            <!-- Portfolio Overview -->
+            <div class="card">
+                <h3>💼 Portfolio Overview</h3>
+                <div id="portfolio-overview">
+                    <div class="portfolio-total">
+                        <div class="total-value" id="total-value">$0.00</div>
+                        <div class="total-label">Total Portfolio Value</div>
+                    </div>
+                    <div class="portfolio-breakdown">
+                        <div class="breakdown-item">
+                            <div class="breakdown-value" id="cash-value">$0.00</div>
+                            <div class="breakdown-label">💵 Cash</div>
+                        </div>
+                        <div class="breakdown-item">
+                            <div class="breakdown-value" id="stock-value">$0.00</div>
+                            <div class="breakdown-label">📊 Stock Value</div>
+                        </div>
+                    </div>
+                </div>
+                <div id="pie-chart" class="chart-container"></div>
+            </div>
+
+            <!-- Holdings & Recent Activity -->
+            <div class="card">
+                <h3>📈 Current Holdings</h3>
+                <div id="holdings-table-container">
+                    <!-- Holdings table will be inserted here -->
+                </div>
+                
+                <h3 style="margin-top: 30px;">🔔 Recent Activity</h3>
+                <div id="recent-trades-container">
+                    <!-- Recent trades will be inserted here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts Row -->
+        <div class="content-grid">
+            <div class="card">
+                <h3>📊 Portfolio Value Over Time</h3>
+                <div id="timeline-chart" class="chart-container"></div>
+            </div>
+            <div class="card">
+                <h3>💹 Stock Prices</h3>
+                <div id="stock-prices-chart" class="chart-container"></div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>Investment Club Dashboard • Data updates automatically every 6 hours</p>
+            <p><a href="/api/stats" target="_blank">View API Stats</a></p>
+        </footer>
+    </div>
+
+    <!-- Custom JavaScript -->
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>

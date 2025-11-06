@@ -1,0 +1,170 @@
+# routes/api.py
+"""
+API endpoints for portfolio data.
+Returns JSON responses for frontend consumption.
+"""
+
+from flask import Blueprint, jsonify, request, current_app
+from sqlalchemy import desc
+from models import db, Price, Trade, Snapshot
+from datetime import datetime, timedelta
+
+api_bp = Blueprint('api', __name__)
+
+
+@api_bp.route('/portfolio')
+def get_portfolio():
+    """Get current portfolio statistics and holdings"""
+    try:
+        pm = current_app.portfolio_manager
+        stats = pm.calculate_portfolio_stats()
+
+        # Format holdings for frontend
+        holdings = []
+        for ticker, data in stats['stock_values'].items():
+            if data['shares'] > 0:  # Only show stocks we own
+                holdings.append({
+                    'ticker': ticker,
+                    'shares': data['shares'],
+                    'price': round(data['price'], 2),
+                    'value': round(data['value'], 2),
+                    'weight': round(data['weight'], 1)
+                })
+
+        return jsonify({
+            'total_value': round(stats['total_portfolio_value'], 2),
+            'cash': round(stats['cash'], 2),
+            'stock_value': round(stats['total_stock_value'], 2),
+            'total_pnl': round(stats['total_pnl'], 2),
+            'pnl_percent': round(stats['pnl_percent'], 2),
+            'holdings': holdings,
+            'timestamp': datetime.utcnow().isoformat()
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/trades')
+def get_trades():
+    """Get recent trades"""
+    try:
+        limit = request.args.get('limit', 20, type=int)
+
+        trades = Trade.query.order_by(desc(Trade.timestamp)).limit(limit).all()
+
+        return jsonify({
+            'trades': [trade.to_dict() for trade in trades],
+            'count': len(trades)
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/timeline')
+def get_timeline():
+    """Get portfolio value over time"""
+    try:
+        days = request.args.get('days', 90, type=int)
+        pm = current_app.portfolio_manager
+
+        timeline = pm.get_portfolio_timeline(days=days)
+
+        return jsonify(timeline)
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/performance')
+def get_performance():
+    """Get performance metrics"""
+    try:
+        pm = current_app.portfolio_manager
+
+        metrics = pm.calculate_performance_metrics()
+        best_stock, worst_stock = pm.get_best_worst_stocks()
+
+        stats = pm.calculate_portfolio_stats()
+
+        return jsonify({
+            'total_return': round(stats['pnl_percent'], 2),
+            'volatility': round(metrics['volatility'], 1),
+            'sharpe_ratio': round(metrics['sharpe_ratio'], 2),
+            'max_drawdown': round(metrics['max_drawdown'], 1),
+            'win_rate': round(metrics['win_rate'], 1),
+            'best_stock': best_stock,
+            'worst_stock': worst_stock,
+            'total_trades': Trade.query.count()
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/prices/<ticker>')
+def get_stock_prices(ticker):
+    """Get price history for a specific stock"""
+    try:
+        days = request.args.get('days', 90, type=int)
+        cutoff = datetime.utcnow() - timedelta(days=days)
+
+        prices = Price.query.filter(
+            Price.ticker == ticker.upper(),
+            Price.timestamp >= cutoff
+        ).order_by(Price.timestamp).all()
+
+        return jsonify({
+            'ticker': ticker.upper(),
+            'prices': [p.to_dict() for p in prices],
+            'count': len(prices)
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/stocks')
+def get_all_stocks():
+    """Get price history for all tracked stocks"""
+    try:
+        days = request.args.get('days', 90, type=int)
+        cutoff = datetime.utcnow() - timedelta(days=days)
+
+        stocks_data = {}
+
+        for ticker in current_app.config['PORTFOLIO_STOCKS']:
+            prices = Price.query.filter(
+                Price.ticker == ticker,
+                Price.timestamp >= cutoff
+            ).order_by(Price.timestamp).all()
+
+            stocks_data[ticker] = {
+                'timestamps': [p.timestamp.isoformat() for p in prices],
+                'prices': [float(p.close) for p in prices]
+            }
+
+        return jsonify(stocks_data)
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/stats')
+def get_stats():
+    """Get database statistics"""
+    try:
+        return jsonify({
+            'total_prices': Price.query.count(),
+            'total_trades': Trade.query.count(),
+            'total_snapshots': Snapshot.query.count(),
+            'stocks_tracked': len(current_app.config['PORTFOLIO_STOCKS']),
+            'oldest_price': Price.query.order_by(
+                Price.timestamp).first().timestamp.isoformat() if Price.query.count() > 0 else None,
+            'latest_price': Price.query.order_by(
+                desc(Price.timestamp)).first().timestamp.isoformat() if Price.query.count() > 0 else None
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
