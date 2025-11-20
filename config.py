@@ -34,13 +34,13 @@ class Config:
 
     # Scheduler settings
     SCHEDULER_API_ENABLED = False  # Disable API by default
-    BACKFILL_INTERVAL_HOURS = 6
+    BACKFILL_INTERVAL_HOURS = 24
     SNAPSHOT_INTERVAL_HOURS = 1
 
     # yfinance settings
     YFINANCE_MAX_RETRIES = 3
     YFINANCE_RETRY_DELAY = 5  # seconds
-    YFINANCE_BACKFILL_DAYS = 365
+    YFINANCE_BACKFILL_DAYS = 3
 
     # Session settings
     PERMANENT_SESSION_LIFETIME = timedelta(days=7)
