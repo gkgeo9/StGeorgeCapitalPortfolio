@@ -6,10 +6,14 @@ Initializes app, database, routes, and scheduler (manual mode).
 
 import os
 from flask import Flask
+from dotenv import load_dotenv  # Add this
 from config import get_config
 from models import db
 from portfolio_manager import PortfolioManager
 from scheduler import start_scheduler
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 def create_app(config_name=None):
@@ -55,7 +59,7 @@ def create_app(config_name=None):
     print("✓ FLASK APP INITIALIZED")
     print("=" * 60)
     print(f"Environment: {config_name}")
-    print(f"Database: {app.config['SQLALCHEMY_DATABASE_URI']}")
+    print(f"Database: {app.config['SQLALCHEMY_DATABASE_URI'][:50]}...")  # Don't print full connection string
     print(f"Stocks tracked: {', '.join(app.config['PORTFOLIO_STOCKS'])}")
     print("Update mode: MANUAL (via UI button)")
     print("=" * 60 + "\n")
