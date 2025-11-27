@@ -2,6 +2,7 @@
 """
 API endpoints for portfolio data.
 Returns JSON responses for frontend consumption.
+Now includes manual refresh/backfill endpoints.
 """
 
 from flask import Blueprint, jsonify, request, current_app
@@ -19,10 +20,9 @@ def get_portfolio():
         pm = current_app.portfolio_manager
         stats = pm.calculate_portfolio_stats()
 
-        # Format holdings for frontend
         holdings = []
         for ticker, data in stats['stock_values'].items():
-            if data['shares'] > 0:  # Only show stocks we own
+            if data['shares'] > 0:
                 holdings.append({
                     'ticker': ticker,
                     'shares': data['shares'],
@@ -45,61 +45,119 @@ def get_portfolio():
         return jsonify({'error': str(e)}), 500
 
 
+@api_bp.route('/refresh', methods=['POST'])
+def manual_refresh():
+    """
+    Manual refresh endpoint - backfills latest price data and takes snapshot.
+    This replaces automatic background updates.
+    """
+    try:
+        pm = current_app.portfolio_manager
+
+        # Run manual backfill (with cooldown protection)
+        success, message = pm.manual_backfill(default_lookback_days=7)
+
+        if not success and "Cooldown" in message:
+            return jsonify({
+                'success': False,
+                'message': message
+            }), 429  # Too Many Requests
+
+        # Take a snapshot after backfill
+        snapshot_result = pm.take_snapshot(note="manual refresh")
+
+        return jsonify({
+            'success': True,
+            'message': message,
+            'portfolio_value': round(snapshot_result['portfolio_value'], 2),
+            'timestamp': datetime.utcnow().isoformat()
+        })
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@api_bp.route('/snapshot', methods=['POST'])
+def take_snapshot():
+    """Take a manual snapshot of current portfolio state"""
+    try:
+        pm = current_app.portfolio_manager
+        note = request.json.get('note', 'manual snapshot') if request.json else 'manual snapshot'
+
+        result = pm.take_snapshot(note=note)
+
+        return jsonify({
+            'success': True,
+            'message': 'Snapshot saved successfully',
+            'portfolio_value': round(result['portfolio_value'], 2),
+            'timestamp': datetime.utcnow().isoformat()
+        })
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 @api_bp.route('/trade', methods=['POST'])
 def execute_trade():
     """Execute a buy or sell trade"""
     try:
         data = request.get_json()
-        
+
         # Validate required fields
         required_fields = ['ticker', 'action', 'quantity', 'price']
         for field in required_fields:
             if field not in data:
                 return jsonify({'error': f'Missing required field: {field}'}), 400
-        
+
         ticker = data['ticker'].upper()
         action = data['action'].upper()
         quantity = int(data['quantity'])
         price = float(data['price'])
         note = data.get('note', '')
-        
+
         # Validate ticker
         if ticker not in current_app.config['PORTFOLIO_STOCKS']:
             return jsonify({'error': f'Invalid ticker: {ticker}'}), 400
-        
+
         # Validate action
         if action not in ['BUY', 'SELL']:
             return jsonify({'error': f'Invalid action: {action}. Must be BUY or SELL'}), 400
-        
+
         # Validate quantity
         if quantity <= 0:
             return jsonify({'error': 'Quantity must be positive'}), 400
-        
+
         # Validate price
         if price <= 0:
             return jsonify({'error': 'Price must be positive'}), 400
-        
+
         # Check if we have enough shares to sell
         if action == 'SELL':
             pm = current_app.portfolio_manager
             positions = pm.get_current_positions()
-            
+
             if positions[ticker] < quantity:
                 return jsonify({
                     'error': f'Insufficient shares. You have {positions[ticker]} shares of {ticker}'
                 }), 400
-        
+
         # Check if we have enough cash to buy
         if action == 'BUY':
             pm = current_app.portfolio_manager
             cash = pm.get_cash_balance()
             total_cost = quantity * price
-            
+
             if cash < total_cost:
                 return jsonify({
                     'error': f'Insufficient cash. You have ${cash:,.2f} but need ${total_cost:,.2f}'
                 }), 400
-        
+
         # Execute trade
         pm = current_app.portfolio_manager
         trade = pm.record_trade(
@@ -109,16 +167,18 @@ def execute_trade():
             price=price,
             note=note
         )
-        
+
         # Take a snapshot after the trade
         pm.take_snapshot(note=f"After {action} trade")
-        
+
         return jsonify({
             'success': True,
             'trade': trade.to_dict(),
             'message': f'Successfully executed {action} of {quantity} {ticker} @ ${price:.2f}'
         })
-        
+
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -236,7 +296,10 @@ def get_stats():
         pm = current_app.portfolio_manager
         cash = pm.get_cash_balance()
         positions = pm.get_current_positions()
-        
+
+        oldest_price = Price.query.order_by(Price.timestamp).first()
+        latest_price = Price.query.order_by(desc(Price.timestamp)).first()
+
         return jsonify({
             'total_prices': Price.query.count(),
             'total_trades': Trade.query.count(),
@@ -244,10 +307,8 @@ def get_stats():
             'stocks_tracked': len(current_app.config['PORTFOLIO_STOCKS']),
             'current_cash': round(cash, 2),
             'current_positions': positions,
-            'oldest_price': Price.query.order_by(
-                Price.timestamp).first().timestamp.isoformat() if Price.query.count() > 0 else None,
-            'latest_price': Price.query.order_by(
-                desc(Price.timestamp)).first().timestamp.isoformat() if Price.query.count() > 0 else None
+            'oldest_price': oldest_price.timestamp.isoformat() if oldest_price else None,
+            'latest_price': latest_price.timestamp.isoformat() if latest_price else None
         })
 
     except Exception as e:

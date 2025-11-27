@@ -2,17 +2,17 @@
 /**
  * Frontend logic for portfolio dashboard
  * Fetches data from API endpoints and renders charts using Plotly
+ * Now with MANUAL refresh instead of automatic updates
  */
 
 // Configuration
 const CONFIG = {
-    AUTO_REFRESH: true,
-    REFRESH_INTERVAL: 60000, // 60 seconds
+    AUTO_REFRESH: false,  // DISABLED automatic refresh
     CHART_COLORS: ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#34495e']
 };
 
 // State
-let refreshInterval = null;
+let isRefreshing = false;
 
 /**
  * Initialize dashboard on page load
@@ -22,12 +22,55 @@ document.addEventListener('DOMContentLoaded', function() {
 
     loadAllData();
 
-    // Set up auto-refresh if enabled
-    if (CONFIG.AUTO_REFRESH) {
-        refreshInterval = setInterval(loadAllData, CONFIG.REFRESH_INTERVAL);
-        console.log(`Auto-refresh enabled: every ${CONFIG.REFRESH_INTERVAL / 1000}s`);
-    }
+    // No automatic refresh interval - all updates are manual now
+    console.log('Manual refresh mode enabled - use refresh button to update data');
 });
+
+/**
+ * Manual refresh button handler
+ */
+async function refreshData() {
+    if (isRefreshing) {
+        showError('Refresh already in progress...');
+        return;
+    }
+
+    isRefreshing = true;
+    showLoading(true);
+    hideError();
+
+    try {
+        // Call the manual refresh API endpoint
+        const response = await fetch('/api/refresh', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            if (response.status === 429) {
+                // Cooldown active
+                showError(data.message);
+            } else {
+                throw new Error(data.error || 'Refresh failed');
+            }
+        } else {
+            // Success - reload all dashboard data
+            await loadAllData();
+            showSuccess(data.message || '✓ Data refreshed successfully');
+        }
+
+    } catch (error) {
+        console.error('Error during refresh:', error);
+        showError('Failed to refresh data: ' + error.message);
+    } finally {
+        isRefreshing = false;
+        showLoading(false);
+    }
+}
 
 /**
  * Load all dashboard data
@@ -318,11 +361,14 @@ function renderRecentTrades(trades) {
         const timeStr = date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit' }) + ' ' +
                        date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
 
+        const actionColor = trade.action === 'BUY' ? '#27ae60' : '#e74c3c';
+
         return `
-            <div class="trade-item" style="background-color: ${index % 2 === 0 ? 'white' : '#f8f9fa'}">
+            <div class="trade-item" style="background-color: ${index % 2 === 0 ? 'white' : '#f8f9fa'}; border-left-color: ${actionColor}">
                 <div class="trade-header">
                     <span class="trade-time">${timeStr}</span>
                     <span class="trade-stock">• ${trade.ticker}</span>
+                    <span style="color: ${actionColor}; font-weight: bold; margin-left: 10px">${trade.action}</span>
                 </div>
                 <div class="trade-details">
                     ${trade.quantity} shares @ $${trade.price.toFixed(2)} = $${trade.total_cost.toLocaleString('en-US', {minimumFractionDigits: 2})}
@@ -491,7 +537,27 @@ function showError(message) {
     const errorText = document.getElementById('error-text');
 
     errorText.textContent = message;
-    errorDiv.style.display = 'block';
+    errorDiv.style.display = 'flex';
+
+    // Auto-hide after 10 seconds
+    setTimeout(() => {
+        errorDiv.style.display = 'none';
+    }, 10000);
+}
+
+/**
+ * Show success message
+ */
+function showSuccess(message) {
+    const successDiv = document.getElementById('success-message');
+    const successText = document.getElementById('success-text');
+
+    successText.textContent = message;
+    successDiv.style.display = 'flex';
+
+    setTimeout(() => {
+        successDiv.style.display = 'none';
+    }, 5000);
 }
 
 /**

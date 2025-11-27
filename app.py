@@ -1,7 +1,7 @@
 # app.py
 """
 Main Flask application entry point.
-Initializes app, database, routes, and scheduler.
+Initializes app, database, routes, and scheduler (manual mode).
 """
 
 import os
@@ -35,12 +35,10 @@ def create_app(config_name=None):
         db.create_all()
         portfolio_manager.initialize_portfolio()
 
-        # Initial backfill on first startup
-        from models import Price
-        if Price.query.count() == 0:
-            print("\n🚀 First startup detected - running initial backfill...")
-            portfolio_manager.backfill_prices(days=365)
-            portfolio_manager.take_snapshot(note="initial startup")
+        # NO automatic backfill on startup
+        # Users will manually refresh via the UI button
+        print("\n⚠️  Automatic backfill DISABLED")
+        print("📌 Use the 'Refresh Data' button in the UI to update prices\n")
 
     # Register blueprints
     from routes.views import views_bp
@@ -49,7 +47,7 @@ def create_app(config_name=None):
     app.register_blueprint(views_bp)
     app.register_blueprint(api_bp, url_prefix='/api')
 
-    # Start background scheduler
+    # Start background scheduler (in manual mode - no automatic jobs)
     scheduler = start_scheduler(app)
     app.scheduler = scheduler
 
@@ -59,10 +57,11 @@ def create_app(config_name=None):
     print(f"Environment: {config_name}")
     print(f"Database: {app.config['SQLALCHEMY_DATABASE_URI']}")
     print(f"Stocks tracked: {', '.join(app.config['PORTFOLIO_STOCKS'])}")
+    print("Update mode: MANUAL (via UI button)")
     print("=" * 60 + "\n")
 
     return app
-#adding nothing tbh
+
 
 if __name__ == '__main__':
     app = create_app()

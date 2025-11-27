@@ -25,6 +25,9 @@ class Config:
     SQLALCHEMY_ENGINE_OPTIONS = {
         'pool_pre_ping': True,
         'pool_recycle': 300,
+        'pool_size': 5,
+        'max_overflow': 10,
+        'pool_timeout': 30,
     }
 
     # Portfolio settings
@@ -32,15 +35,15 @@ class Config:
     INITIAL_CASH = 100000
     SHARES_PER_TRADE = 100
 
-    # Scheduler settings
-    SCHEDULER_API_ENABLED = False  # Disable API by default
-    BACKFILL_INTERVAL_HOURS = 24
-    SNAPSHOT_INTERVAL_HOURS = 1
+    # Scheduler settings (all disabled for manual mode)
+    SCHEDULER_API_ENABLED = False
+    BACKFILL_INTERVAL_HOURS = None  # Disabled
+    SNAPSHOT_INTERVAL_HOURS = None  # Disabled
 
     # yfinance settings
     YFINANCE_MAX_RETRIES = 3
     YFINANCE_RETRY_DELAY = 5  # seconds
-    YFINANCE_BACKFILL_DAYS = 3
+    YFINANCE_BACKFILL_DAYS = 7  # Default lookback for manual refresh
 
     # Session settings
     PERMANENT_SESSION_LIFETIME = timedelta(days=7)

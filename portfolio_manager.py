@@ -1,6 +1,6 @@
 # portfolio_manager.py
 """
-Core portfolio management logic.
+Core portfolio management logic with validation from CSV logger.
 Handles calculations, statistics, and portfolio operations using database.
 """
 
@@ -15,10 +15,12 @@ from models import db, Price, Trade, Snapshot, PortfolioConfig
 
 
 class PortfolioManager:
-    """Manages portfolio operations and calculations"""
+    """Manages portfolio operations and calculations with validation"""
 
     def __init__(self, app=None):
         self.app = app
+        self._last_backfill_ts = None
+        self._cooldown_seconds = 60  # 1 minute cooldown for manual backfill
         if app:
             self.init_app(app)
 
@@ -31,14 +33,82 @@ class PortfolioManager:
         self.max_retries = app.config['YFINANCE_MAX_RETRIES']
         self.retry_delay = app.config['YFINANCE_RETRY_DELAY']
 
+    # ========================================
+    # VALIDATION METHODS (from Daniel's CSV logger)
+    # ========================================
+
+    def _validate_tickers(self, tickers: List[str]) -> List[str]:
+        """Validate and clean ticker list"""
+        if not isinstance(tickers, list) or not tickers:
+            raise ValueError("tickers must be a non-empty list")
+        clean = []
+        for t in tickers:
+            if not isinstance(t, str) or not t.strip():
+                raise ValueError(f"Invalid ticker: {t!r}")
+            clean.append(t.strip().upper())
+        return list(dict.fromkeys(clean))  # Remove duplicates, preserve order
+
+    def _assert_action(self, action: str, ticker: str) -> None:
+        """Validate trade action"""
+        if action not in {'BUY', 'SELL', 'NONE'}:
+            raise ValueError(f"[{ticker}] invalid action: {action}")
+
+    def _assert_quantity(self, qty: int, ticker: str, action: str) -> None:
+        """Validate trade quantity"""
+        if not isinstance(qty, int):
+            raise ValueError(f"[{ticker}] qty must be int")
+        if action == 'NONE' and qty != 0:
+            raise ValueError(f"[{ticker}] qty must be 0 for NONE")
+        if action in {'BUY', 'SELL'} and qty <= 0:
+            raise ValueError(f"[{ticker}] qty must be >0 for {action}")
+
+    def _assert_position(self, pos_after: int, ticker: str, action: str, qty: int) -> None:
+        """Validate position after trade"""
+        if not isinstance(pos_after, int):
+            raise ValueError(f"[{ticker}] position_after must be int")
+        if pos_after < 0:
+            raise ValueError(f"[{ticker}] position_after cannot be negative")
+
+    def _assert_price(self, price: float, ticker: str, context: str) -> None:
+        """Validate stock price"""
+        if pd.isna(price):
+            raise ValueError(f"[{ticker}] price is NaN in {context}")
+        try:
+            p = float(price)
+        except Exception:
+            raise ValueError(f"[{ticker}] invalid price in {context}")
+        if p <= 0:
+            raise ValueError(f"[{ticker}] price must be > 0 in {context}")
+
+    def _assert_cash(self, cash_after: float) -> None:
+        """Validate cash balance"""
+        try:
+            c = float(cash_after)
+        except Exception:
+            raise ValueError("cash_after must be numeric")
+        if c < 0:
+            raise ValueError("cash_after cannot be negative")
+
+    def _sanitize_note(self, s: str) -> str:
+        """Sanitize note to prevent CSV injection"""
+        s = s or ""
+        return "'" + s if s[:1] in ("=", "+", "-", "@") else s
+
+    # ========================================
+    # INITIALIZATION
+    # ========================================
+
     def initialize_portfolio(self):
         """Initialize portfolio configuration in database"""
         with self.app.app_context():
-            # Set initial values if not exists
             if not PortfolioConfig.get_value('initial_cash'):
                 PortfolioConfig.set_value('initial_cash', self.initial_cash)
                 PortfolioConfig.set_value('start_date', datetime.now(timezone.utc).isoformat())
                 print(f"✓ Initialized portfolio with ${self.initial_cash:,.2f}")
+
+    # ========================================
+    # PRICE FETCHING
+    # ========================================
 
     def get_current_prices(self, use_cache=True) -> Dict[str, float]:
         """
@@ -50,7 +120,7 @@ class PortfolioManager:
         for attempt in range(self.max_retries):
             try:
                 if attempt > 0:
-                    time.sleep(self.retry_delay * (2 ** attempt))  # Exponential backoff
+                    time.sleep(self.retry_delay * (2 ** attempt))
 
                 for stock in self.stocks:
                     try:
@@ -58,25 +128,28 @@ class PortfolioManager:
                         hist = ticker.history(period='1d')
 
                         if not hist.empty:
-                            prices[stock] = float(hist['Close'].iloc[-1])
+                            price = float(hist['Close'].iloc[-1])
+                            self._assert_price(price, stock, "get_current_prices")
+                            prices[stock] = price
                         else:
-                            # Fallback to info
                             info = ticker.info
-                            prices[stock] = float(info.get('regularMarketPrice', 0))
+                            price = float(info.get('regularMarketPrice', 0))
+                            if price <= 0:
+                                raise ValueError("Invalid price from info")
+                            self._assert_price(price, stock, "get_current_prices")
+                            prices[stock] = price
 
-                        time.sleep(0.2)  # Rate limit protection
+                        time.sleep(0.2)
 
                     except Exception as e:
                         if "429" in str(e):
-                            raise  # Re-raise to trigger retry
+                            raise
                         print(f"  Warning: Could not fetch {stock}: {e}")
                         prices[stock] = None
 
-                # If we got all prices, return
                 if all(v is not None for v in prices.values()):
                     return prices
 
-                # Use database fallback for missing prices
                 if use_cache:
                     prices = self._get_prices_from_db(prices)
                     return prices
@@ -92,7 +165,6 @@ class PortfolioManager:
                     if use_cache:
                         return self._get_prices_from_db()
 
-        # Last resort
         return self._get_prices_from_db()
 
     def _get_prices_from_db(self, partial_prices: Dict[str, float] = None) -> Dict[str, float]:
@@ -108,88 +180,163 @@ class PortfolioManager:
                 if latest_price:
                     prices[stock] = float(latest_price.close)
                 else:
-                    prices[stock] = 100.0  # Default fallback
+                    prices[stock] = 100.0
 
         return prices
 
-    def backfill_prices(self, days: int = 365, force: bool = False):
+    # ========================================
+    # BACKFILL (with cooldown from Daniel's approach)
+    # ========================================
+
+    def manual_backfill(self, default_lookback_days: int = 7) -> Tuple[bool, str]:
+        """
+        Manual backfill triggered by user button.
+        Has cooldown to avoid yfinance rate limits.
+        Returns (success, message)
+        """
+        now = datetime.now(timezone.utc)
+
+        # Check cooldown
+        if self._last_backfill_ts:
+            elapsed = (now - self._last_backfill_ts).total_seconds()
+            if elapsed < self._cooldown_seconds:
+                remaining = int(self._cooldown_seconds - elapsed)
+                return False, f"⏳ Cooldown active. Please wait {remaining} seconds before refreshing again."
+
+        # Determine date range - FIX: ensure we're working with date objects consistently
+        today = now.date()
+
+        # Find last logged date
+        last_datetime = self._last_logged_day()
+
+        if last_datetime is None:
+            # No data exists - backfill from lookback period
+            start_date = today - timedelta(days=default_lookback_days)
+            message_prefix = "Initial backfill"
+        else:
+            # Convert datetime to date for comparison
+            last_date = last_datetime.date() if isinstance(last_datetime, datetime) else last_datetime
+            start_date = last_date + timedelta(days=1)
+
+            if start_date > today:
+                return False, "✓ Already up to date"
+            message_prefix = "Incremental backfill"
+
+        # Convert end_date to ensure compatibility
+        end_date = today + timedelta(days=1)
+
+        # Run backfill
+        result = self.backfill_prices(
+            start_date=start_date,
+            end_date=end_date,
+            note="manual backfill"
+        )
+
+        self._last_backfill_ts = now
+
+        if result['success']:
+            total_added = sum(result['counts'].values())
+            return True, f"✓ {message_prefix}: Added {total_added} price records"
+        else:
+            return False, f"⚠️ Backfill failed: {result.get('error', 'Unknown error')}"
+
+    def _last_logged_day(self) -> Optional[datetime]:
+        """Get the most recent datetime we have price data for"""
+        latest = db.session.query(func.max(Price.timestamp)).scalar()
+        if latest:
+            # Return as datetime with time zeroed out for date comparison
+            return latest.replace(hour=0, minute=0, second=0, microsecond=0)
+        return None
+
+    def backfill_prices(self, start_date, end_date, note: str = "backfill") -> Dict:
         """
         Backfill historical price data from yfinance.
-        Only fetches data we don't already have (unless force=True).
+        Returns dict with success status and counts.
         """
         print(f"\n{'=' * 60}")
-        print(f"BACKFILLING PRICE DATA ({days} days)")
+        print(f"BACKFILLING PRICE DATA")
         print(f"{'=' * 60}\n")
 
-        end_date = datetime.now(timezone.utc)
+        result = {
+            'success': True,
+            'counts': {},
+            'error': None
+        }
+
+        # Convert dates to strings for yfinance
+        start_str = start_date.strftime('%Y-%m-%d') if hasattr(start_date, 'strftime') else str(start_date)
+        end_str = end_date.strftime('%Y-%m-%d') if hasattr(end_date, 'strftime') else str(end_date)
 
         for stock in self.stocks:
             try:
-                # Find last logged date for this stock
-                if not force:
-                    last_price = Price.query.filter_by(ticker=stock) \
-                        .order_by(desc(Price.timestamp)) \
-                        .first()
+                print(f"[{stock}] Fetching from {start_str} to {end_str}...")
 
-                    if last_price:
-                        start_date = last_price.timestamp + timedelta(days=1)
-                        print(f"[{stock}] Updating from {start_date.date()}...")
-                    else:
-                        start_date = end_date - timedelta(days=days)
-                        print(f"[{stock}] Initial backfill from {start_date.date()}...")
-                else:
-                    start_date = end_date - timedelta(days=days)
-                    print(f"[{stock}] Force backfill from {start_date.date()}...")
-
-                # Skip if start_date is in the future
-                if start_date.date() >= end_date.date():
-                    print(f"[{stock}] Already up to date")
-                    continue
-
-                # Fetch data from yfinance
                 ticker = yf.Ticker(stock)
                 hist = ticker.history(
-                    start=start_date.strftime('%Y-%m-%d'),
-                    end=end_date.strftime('%Y-%m-%d'),
+                    start=start_str,
+                    end=end_str,
                     interval='1d',
                     auto_adjust=False
                 )
 
                 if hist.empty:
                     print(f"[{stock}] No data returned")
+                    result['counts'][stock] = 0
                     continue
 
-                # Insert into database
                 count = 0
                 for timestamp, row in hist.iterrows():
-                    price = Price(
-                        ticker=stock,
-                        timestamp=timestamp.to_pydatetime().replace(tzinfo=timezone.utc),
-                        close=float(row['Close']),
-                        open=float(row['Open']),
-                        high=float(row['High']),
-                        low=float(row['Low']),
-                        volume=int(row['Volume']),
-                        note='backfill'
-                    )
+                    try:
+                        close_price = float(row['Close'])
+                        self._assert_price(close_price, stock, "backfill")
 
-                    # Check if already exists
-                    existing = Price.query.filter_by(
-                        ticker=stock,
-                        timestamp=price.timestamp
-                    ).first()
+                        ts = timestamp.to_pydatetime().replace(tzinfo=timezone.utc)
 
-                    if not existing:
+                        event_id = Price.generate_event_id(
+                            ticker=stock,
+                            timestamp=ts,
+                            close=close_price,
+                            kind='HISTORY',
+                            note=note
+                        )
+
+                        existing = Price.query.filter_by(event_id=event_id).first()
+                        if existing:
+                            continue
+
+                        price = Price(
+                            event_id=event_id,
+                            ticker=stock,
+                            timestamp=ts,
+                            close=close_price,
+                            open=float(row['Open']),
+                            high=float(row['High']),
+                            low=float(row['Low']),
+                            volume=int(row['Volume']),
+                            kind='HISTORY',
+                            price_source='yfinance',
+                            out_of_order=False,
+                            note=note
+                        )
+
                         db.session.add(price)
                         count += 1
 
+                    except Exception as e:
+                        print(f"[{stock}] Error processing row: {e}")
+                        continue
+
                 db.session.commit()
+                result['counts'][stock] = count
                 print(f"[{stock}] Added {count} new price records")
 
-                time.sleep(0.5)  # Rate limit protection
+                time.sleep(0.5)
 
             except Exception as e:
                 print(f"[{stock}] Error during backfill: {e}")
+                result['success'] = False
+                result['error'] = str(e)
+                result['counts'][stock] = 0
                 db.session.rollback()
                 continue
 
@@ -197,27 +344,57 @@ class PortfolioManager:
         print(f"BACKFILL COMPLETE")
         print(f"{'=' * 60}\n")
 
+        return result
+
+    # ========================================
+    # TRADING
+    # ========================================
+
     def record_trade(self, ticker: str, action: str, quantity: int, price: float, note: str = ""):
-        """Record a trade in the database"""
+        """Record a trade in the database with full validation"""
+        # Validate inputs
+        self._assert_action(action, ticker)
+        self._assert_quantity(quantity, ticker, action)
+        self._assert_price(price, ticker, "record_trade")
+
         if action not in ['BUY', 'SELL']:
             raise ValueError(f"Invalid action: {action}")
 
-        if quantity <= 0:
-            raise ValueError("Quantity must be positive")
-
-        if price <= 0:
-            raise ValueError("Price must be positive")
-
         total_cost = quantity * price
 
+        # Get current state
+        positions = self.get_current_positions()
+        cash_before = self.get_cash_balance()
+        position_before = positions.get(ticker, 0)
+
+        # Calculate new state
+        if action == 'BUY':
+            position_after = position_before + quantity
+            cash_after = cash_before - total_cost
+        else:  # SELL
+            position_after = position_before - quantity
+            cash_after = cash_before + total_cost
+
+        # Final validations
+        self._assert_position(position_after, ticker, action, quantity)
+        self._assert_cash(cash_after)
+
+        timestamp = datetime.now(timezone.utc)
+        event_id = Trade.generate_event_id(timestamp, ticker, action, quantity, price)
+
         trade = Trade(
-            timestamp=datetime.now(timezone.utc),
+            event_id=event_id,
+            timestamp=timestamp,
             ticker=ticker,
             action=action,
             quantity=quantity,
             price=price,
             total_cost=total_cost,
-            note=note
+            position_before=position_before,
+            position_after=position_after,
+            cash_before=cash_before,
+            cash_after=cash_after,
+            note=self._sanitize_note(note)
         )
 
         db.session.add(trade)
@@ -227,7 +404,11 @@ class PortfolioManager:
 
         return trade
 
-    def take_snapshot(self, note: str = "scheduled"):
+    # ========================================
+    # SNAPSHOTS
+    # ========================================
+
+    def take_snapshot(self, note: str = "manual snapshot"):
         """Take a snapshot of current portfolio state"""
         print(f"\n📸 Taking portfolio snapshot...")
 
@@ -237,24 +418,36 @@ class PortfolioManager:
 
         timestamp = datetime.now(timezone.utc)
 
-        # Calculate total portfolio value
         stock_value = sum(positions[stock] * prices[stock] for stock in self.stocks)
         portfolio_value = stock_value + cash_balance
 
-        # Create snapshot for each stock
         for stock in self.stocks:
+            event_id = Snapshot.generate_event_id(timestamp, stock, positions[stock])
+
+            # Check if already exists
+            existing = Snapshot.query.filter_by(event_id=event_id).first()
+            if existing:
+                continue
+
             snapshot = Snapshot(
+                event_id=event_id,
                 timestamp=timestamp,
                 ticker=stock,
                 position=positions[stock],
                 cash_balance=cash_balance,
                 portfolio_value=portfolio_value,
-                note=note
+                note=self._sanitize_note(note)
             )
             db.session.add(snapshot)
 
         db.session.commit()
         print(f"✓ Snapshot saved: Portfolio value ${portfolio_value:,.2f}")
+
+        return {'success': True, 'portfolio_value': portfolio_value}
+
+    # ========================================
+    # PORTFOLIO CALCULATIONS
+    # ========================================
 
     def get_current_positions(self) -> Dict[str, int]:
         """Get current stock positions by calculating from all trades"""
@@ -292,7 +485,6 @@ class PortfolioManager:
         cash = self.get_cash_balance()
         initial_value = float(PortfolioConfig.get_value('initial_cash', self.initial_cash))
 
-        # Calculate stock values
         stock_values = {}
         total_stock_value = 0
 
@@ -305,16 +497,14 @@ class PortfolioManager:
                 'shares': shares,
                 'price': price,
                 'value': value,
-                'weight': 0  # Will calculate after total
+                'weight': 0
             }
             total_stock_value += value
 
-        # Calculate totals and percentages
         total_portfolio_value = total_stock_value + cash
         total_pnl = total_portfolio_value - initial_value
         pnl_percent = (total_pnl / initial_value * 100) if initial_value > 0 else 0
 
-        # Calculate weights
         for stock in stock_values:
             if total_portfolio_value > 0:
                 stock_values[stock]['weight'] = (stock_values[stock]['value'] / total_portfolio_value * 100)
@@ -335,7 +525,6 @@ class PortfolioManager:
         """Get portfolio value over time from snapshots"""
         cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
 
-        # Get unique timestamps from snapshots
         snapshots = db.session.query(
             Snapshot.timestamp,
             func.max(Snapshot.portfolio_value).label('value')
@@ -357,7 +546,6 @@ class PortfolioManager:
 
     def calculate_performance_metrics(self) -> Dict:
         """Calculate advanced performance metrics"""
-        # Get portfolio timeline
         timeline = self.get_portfolio_timeline(days=365)
 
         if len(timeline['values']) < 2:
@@ -368,14 +556,11 @@ class PortfolioManager:
                 'win_rate': 0
             }
 
-        # Calculate returns
         values = np.array(timeline['values'])
         returns = np.diff(values) / values[:-1]
 
-        # Volatility (annualized)
         volatility = float(np.std(returns) * np.sqrt(252) * 100) if len(returns) > 0 else 0
 
-        # Max drawdown
         peak = values[0]
         max_dd = 0
         for value in values:
@@ -385,13 +570,11 @@ class PortfolioManager:
             if dd > max_dd:
                 max_dd = dd
 
-        # Win rate from trades
         trades = Trade.query.filter_by(action='BUY').all()
         winning_trades = 0
 
         if trades:
             for trade in trades:
-                # Get latest price for this stock
                 latest_price = Price.query.filter_by(ticker=trade.ticker) \
                     .order_by(desc(Price.timestamp)) \
                     .first()
@@ -403,8 +586,7 @@ class PortfolioManager:
         else:
             win_rate = 0
 
-        # Sharpe ratio (simplified)
-        risk_free_rate = 0.05 / 252  # Daily risk-free rate
+        risk_free_rate = 0.05 / 252
         excess_returns = returns - risk_free_rate
         sharpe = float(np.mean(excess_returns) / np.std(excess_returns) * np.sqrt(252)) if len(returns) > 1 and np.std(
             excess_returns) > 0 else 0
@@ -424,7 +606,6 @@ class PortfolioManager:
         worst_return = float('inf')
 
         for stock in self.stocks:
-            # Get first and last price
             first_price = Price.query.filter_by(ticker=stock) \
                 .order_by(Price.timestamp) \
                 .first()

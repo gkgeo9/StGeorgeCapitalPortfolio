@@ -1,21 +1,23 @@
 # models.py
 """
 Database models for portfolio tracking system.
-Defines tables: prices, trades, snapshots, portfolio_config
+Enhanced with audit fields and validation from CSV logger approach.
 """
 
 from datetime import datetime
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import Index
+import hashlib
 
 db = SQLAlchemy()
 
 
 class Price(db.Model):
-    """Historical stock prices from yfinance"""
+    """Historical stock prices with audit trail"""
     __tablename__ = 'prices'
 
     id = db.Column(db.Integer, primary_key=True)
+    event_id = db.Column(db.String(16), unique=True, nullable=False, index=True)
     ticker = db.Column(db.String(10), nullable=False, index=True)
     timestamp = db.Column(db.DateTime, nullable=False, index=True)
     close = db.Column(db.Numeric(10, 2), nullable=False)
@@ -23,14 +25,24 @@ class Price(db.Model):
     high = db.Column(db.Numeric(10, 2))
     low = db.Column(db.Numeric(10, 2))
     volume = db.Column(db.BigInteger)
+
+    # Audit fields from Daniel's CSV logger
+    kind = db.Column(db.String(20), default='HISTORY')  # HISTORY, SNAPSHOT, TRADE
+    price_source = db.Column(db.String(20), default='yfinance')  # yfinance, user, alpha_vantage
+    out_of_order = db.Column(db.Boolean, default=False)
     note = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    # Unique constraint: one price per ticker per timestamp
     __table_args__ = (
-        db.UniqueConstraint('ticker', 'timestamp', name='uix_ticker_timestamp'),
         Index('idx_ticker_timestamp', 'ticker', 'timestamp'),
+        Index('idx_event_id', 'event_id'),
     )
+
+    @staticmethod
+    def generate_event_id(ticker, timestamp, close, kind='HISTORY', note=''):
+        """Generate unique event ID for deduplication"""
+        key = f"{timestamp.isoformat()}|{ticker}|{kind}|{float(close)}|{note}"
+        return hashlib.sha256(key.encode('utf-8')).hexdigest()[:16]
 
     def __repr__(self):
         return f'<Price {self.ticker} @ {self.timestamp}: ${self.close}>'
@@ -38,6 +50,7 @@ class Price(db.Model):
     def to_dict(self):
         return {
             'id': self.id,
+            'event_id': self.event_id,
             'ticker': self.ticker,
             'timestamp': self.timestamp.isoformat(),
             'close': float(self.close),
@@ -45,21 +58,31 @@ class Price(db.Model):
             'high': float(self.high) if self.high else None,
             'low': float(self.low) if self.low else None,
             'volume': self.volume,
+            'kind': self.kind,
+            'price_source': self.price_source,
+            'out_of_order': self.out_of_order,
             'note': self.note
         }
 
 
 class Trade(db.Model):
-    """Buy/Sell transactions"""
+    """Buy/Sell transactions with audit trail"""
     __tablename__ = 'trades'
 
     id = db.Column(db.Integer, primary_key=True)
+    event_id = db.Column(db.String(16), unique=True, nullable=False, index=True)
     timestamp = db.Column(db.DateTime, nullable=False, index=True)
     ticker = db.Column(db.String(10), nullable=False, index=True)
     action = db.Column(db.String(10), nullable=False)  # BUY, SELL
     quantity = db.Column(db.Integer, nullable=False)
     price = db.Column(db.Numeric(10, 2), nullable=False)
     total_cost = db.Column(db.Numeric(12, 2), nullable=False)
+
+    # Audit fields
+    position_before = db.Column(db.Integer)
+    position_after = db.Column(db.Integer, nullable=False)
+    cash_before = db.Column(db.Numeric(12, 2))
+    cash_after = db.Column(db.Numeric(12, 2), nullable=False)
     note = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -68,32 +91,44 @@ class Trade(db.Model):
         Index('idx_ticker', 'ticker'),
     )
 
+    @staticmethod
+    def generate_event_id(timestamp, ticker, action, quantity, price):
+        """Generate unique event ID for deduplication"""
+        key = f"{timestamp.isoformat()}|{ticker}|{action}|{quantity}|{float(price)}"
+        return hashlib.sha256(key.encode('utf-8')).hexdigest()[:16]
+
     def __repr__(self):
         return f'<Trade {self.action} {self.quantity} {self.ticker} @ ${self.price}>'
 
     def to_dict(self):
         return {
             'id': self.id,
+            'event_id': self.event_id,
             'timestamp': self.timestamp.isoformat(),
             'ticker': self.ticker,
             'action': self.action,
             'quantity': self.quantity,
             'price': float(self.price),
             'total_cost': float(self.total_cost),
+            'position_before': self.position_before,
+            'position_after': self.position_after,
+            'cash_before': float(self.cash_before) if self.cash_before else None,
+            'cash_after': float(self.cash_after) if self.cash_after else None,
             'note': self.note
         }
 
 
 class Snapshot(db.Model):
-    """Portfolio state snapshots (taken periodically)"""
+    """Portfolio state snapshots (taken manually or after trades)"""
     __tablename__ = 'snapshots'
 
     id = db.Column(db.Integer, primary_key=True)
+    event_id = db.Column(db.String(16), unique=True, nullable=False, index=True)
     timestamp = db.Column(db.DateTime, nullable=False, index=True)
     ticker = db.Column(db.String(10), nullable=False, index=True)
-    position = db.Column(db.Integer, nullable=False, default=0)  # shares held
-    cash_balance = db.Column(db.Numeric(12, 2))  # cash at this moment
-    portfolio_value = db.Column(db.Numeric(12, 2))  # total value at this moment
+    position = db.Column(db.Integer, nullable=False, default=0)
+    cash_balance = db.Column(db.Numeric(12, 2))
+    portfolio_value = db.Column(db.Numeric(12, 2))
     note = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -102,12 +137,19 @@ class Snapshot(db.Model):
         Index('idx_snapshot_ticker_timestamp', 'ticker', 'timestamp'),
     )
 
+    @staticmethod
+    def generate_event_id(timestamp, ticker, position):
+        """Generate unique event ID for deduplication"""
+        key = f"{timestamp.isoformat()}|{ticker}|SNAPSHOT|{position}"
+        return hashlib.sha256(key.encode('utf-8')).hexdigest()[:16]
+
     def __repr__(self):
         return f'<Snapshot {self.ticker} @ {self.timestamp}: {self.position} shares>'
 
     def to_dict(self):
         return {
             'id': self.id,
+            'event_id': self.event_id,
             'timestamp': self.timestamp.isoformat(),
             'ticker': self.ticker,
             'position': self.position,
