@@ -218,40 +218,34 @@ function renderKPICards(data) {
 
     const cards = [
         {
-            icon: '💰',
             value: `${data.total_return >= 0 ? '+' : ''}${data.total_return}%`,
             label: 'Total Return',
             color: pnlColor
         },
         {
-            icon: '🎯',
             value: `${data.win_rate.toFixed(1)}%`,
             label: 'Win Rate',
-            color: '#3498db'
+            color: '#1e3a5f'
         },
         {
-            icon: '📊',
             value: `${data.volatility.toFixed(1)}%`,
             label: 'Volatility',
-            color: '#9b59b6'
+            color: '#1e3a5f'
         },
         {
-            icon: '📉',
             value: `${data.max_drawdown.toFixed(1)}%`,
             label: 'Max Drawdown',
             color: '#e67e22'
         },
         {
-            icon: '🔢',
             value: data.total_trades.toString(),
             label: 'Total Trades',
-            color: '#1abc9c'
+            color: '#1e3a5f'
         }
     ];
 
     container.innerHTML = cards.map(card => `
         <div class="kpi-card">
-            <div class="kpi-icon">${card.icon}</div>
             <div class="kpi-value" style="color: ${card.color}">${card.value}</div>
             <div class="kpi-label">${card.label}</div>
         </div>

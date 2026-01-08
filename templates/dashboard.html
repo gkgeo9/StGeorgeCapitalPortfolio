@@ -15,22 +15,22 @@
         /* Manual Refresh Button */
         .refresh-btn {
             padding: 12px 30px;
-            background: linear-gradient(135deg, #27ae60 0%, #229954 100%);
+            background: #1e3a5f;
             color: white;
             border: none;
             border-radius: 8px;
             font-size: 16px;
             font-weight: bold;
             cursor: pointer;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            box-shadow: 0 4px 6px rgba(30, 58, 95, 0.3);
             transition: all 0.3s;
             margin-left: 15px;
         }
 
         .refresh-btn:hover {
-            background: linear-gradient(135deg, #229954 0%, #1e8449 100%);
+            background: #152c4a;
             transform: translateY(-2px);
-            box-shadow: 0 6px 12px rgba(0,0,0,0.15);
+            box-shadow: 0 6px 12px rgba(30, 58, 95, 0.4);
         }
 
         .refresh-btn:active {
@@ -145,32 +145,29 @@
             background: #7f8c8d;
         }
 
-        /* Trade button (hidden by default) */
+        /* Trade button (always visible) */
         .admin-trade-btn {
             position: fixed;
             bottom: 30px;
             right: 30px;
             width: 60px;
             height: 60px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #1e3a5f;
             color: white;
             border: none;
             border-radius: 50%;
             font-size: 24px;
             cursor: pointer;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            box-shadow: 0 4px 12px rgba(30, 58, 95, 0.4);
             transition: all 0.3s;
-            display: none;
+            display: block;
             z-index: 1000;
         }
 
         .admin-trade-btn:hover {
             transform: scale(1.1);
-            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
-        }
-
-        .admin-trade-btn.visible {
-            display: block;
+            background: #152c4a;
+            box-shadow: 0 6px 20px rgba(30, 58, 95, 0.5);
         }
 
         .success-message {
@@ -202,9 +199,9 @@
     <div class="container">
         <!-- Header -->
         <header class="header">
-            <h1>📊 Investment Club Portfolio</h1>
+            <h1>St. George Capital Portfolio</h1>
             <p class="last-update">Last updated: <span id="last-update-time">Loading...</span></p>
-            <button onclick="refreshData()" class="refresh-btn" id="refresh-btn">🔄 Refresh Data</button>
+            <button onclick="refreshData()" class="refresh-btn" id="refresh-btn">Refresh Data</button>
         </header>
 
         <!-- Loading overlay -->
@@ -234,7 +231,7 @@
         <div class="content-grid">
             <!-- Portfolio Overview -->
             <div class="card">
-                <h3>💼 Portfolio Overview</h3>
+                <h3>Portfolio Overview</h3>
                 <div id="portfolio-overview">
                     <div class="portfolio-total">
                         <div class="total-value" id="total-value">$0.00</div>
@@ -243,11 +240,11 @@
                     <div class="portfolio-breakdown">
                         <div class="breakdown-item">
                             <div class="breakdown-value" id="cash-value">$0.00</div>
-                            <div class="breakdown-label">💵 Cash</div>
+                            <div class="breakdown-label">Cash</div>
                         </div>
                         <div class="breakdown-item">
                             <div class="breakdown-value" id="stock-value">$0.00</div>
-                            <div class="breakdown-label">📊 Stock Value</div>
+                            <div class="breakdown-label">Stock Value</div>
                         </div>
                     </div>
                 </div>
@@ -256,12 +253,12 @@
 
             <!-- Holdings & Recent Activity -->
             <div class="card">
-                <h3>📈 Current Holdings</h3>
+                <h3>Current Holdings</h3>
                 <div id="holdings-table-container">
                     <!-- Holdings table will be inserted here -->
                 </div>
 
-                <h3 style="margin-top: 30px;">🔔 Recent Activity</h3>
+                <h3 style="margin-top: 30px;">Recent Activity</h3>
                 <div id="recent-trades-container">
                     <!-- Recent trades will be inserted here -->
                 </div>
@@ -271,11 +268,11 @@
         <!-- Charts Row -->
         <div class="content-grid">
             <div class="card">
-                <h3>📊 Portfolio Value Over Time</h3>
+                <h3>Portfolio Value Over Time</h3>
                 <div id="timeline-chart" class="chart-container"></div>
             </div>
             <div class="card">
-                <h3>💹 Stock Prices</h3>
+                <h3>Stock Prices</h3>
                 <div id="stock-prices-chart" class="chart-container"></div>
             </div>
         </div>
@@ -287,8 +284,8 @@
         </footer>
     </div>
 
-    <!-- Floating Trade Button (hidden by default, press 't' 3 times to show) -->
-    <button class="admin-trade-btn" id="trade-btn" onclick="openTradeModal()">💰</button>
+    <!-- Floating Trade Button (always visible) -->
+    <button class="admin-trade-btn" id="trade-btn" onclick="openTradeModal()">$</button>
 
     <!-- Trade Modal -->
     <div class="trade-modal" id="trade-modal">
@@ -327,8 +324,8 @@
                 </div>
 
                 <div class="trade-buttons">
-                    <button type="button" class="btn-buy" onclick="executeTrade('BUY')">🟢 BUY</button>
-                    <button type="button" class="btn-sell" onclick="executeTrade('SELL')">🔴 SELL</button>
+                    <button type="button" class="btn-buy" onclick="executeTrade('BUY')">BUY</button>
+                    <button type="button" class="btn-sell" onclick="executeTrade('SELL')">SELL</button>
                     <button type="button" class="btn-cancel" onclick="closeTradeModal()">Cancel</button>
                 </div>
             </form>
@@ -339,27 +336,6 @@
     <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 
     <script>
-        // Secret key combination to show trade button (press 't' 3 times quickly)
-        let tPresses = 0;
-        let tTimer = null;
-
-        document.addEventListener('keydown', function(e) {
-            if (e.key === 't' || e.key === 'T') {
-                tPresses++;
-
-                if (tPresses === 3) {
-                    document.getElementById('trade-btn').classList.add('visible');
-                    showSuccess('Trade button activated! 💰');
-                    tPresses = 0;
-                }
-
-                clearTimeout(tTimer);
-                tTimer = setTimeout(() => {
-                    tPresses = 0;
-                }, 1000);
-            }
-        });
-
         // Store current prices globally
         let currentPrices = {};
 

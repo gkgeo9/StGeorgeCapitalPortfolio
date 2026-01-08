@@ -1,7 +1,8 @@
 /* dashboard.css */
 /**
- * Styling for portfolio dashboard
- * Modern, clean design with purple gradient theme
+ * Styling for St. George Capital Portfolio Dashboard
+ * Clean, professional design with white background and navy (#1e3a5f) accents
+ * Typography: Times New Roman / serif fonts
  */
 
 /* Reset and base styles */
@@ -12,8 +13,8 @@
 }
 
 body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    font-family: 'Times New Roman', Times, Georgia, 'Cambria', serif;
+    background: #ffffff;
     padding: 20px;
     min-height: 100vh;
     color: #2c3e50;
@@ -25,7 +26,8 @@ body {
     background: white;
     border-radius: 20px;
     padding: 30px;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 4px 20px rgba(30, 58, 95, 0.15);
+    border: 1px solid #e5e7eb;
 }
 
 /* Header */
@@ -33,7 +35,7 @@ body {
     text-align: center;
     margin-bottom: 30px;
     padding: 20px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: #1e3a5f;
     border-radius: 15px;
     color: white;
 }
@@ -118,18 +120,13 @@ body {
 
 .kpi-card:hover {
     transform: translateY(-2px);
-    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
-}
-
-.kpi-icon {
-    font-size: 32px;
-    margin-bottom: 10px;
+    box-shadow: 0 6px 12px rgba(30, 58, 95, 0.2);
 }
 
 .kpi-value {
-    font-size: 24px;
+    font-size: 28px;
     font-weight: bold;
-    margin-bottom: 5px;
+    margin-bottom: 8px;
 }
 
 .kpi-label {
@@ -175,7 +172,7 @@ body {
 .total-value {
     font-size: 36px;
     font-weight: bold;
-    color: #2980b9;
+    color: #1e3a5f;
 }
 
 .total-label {
@@ -214,7 +211,7 @@ body {
 }
 
 .holdings-table thead {
-    background: #3498db;
+    background: #1e3a5f;
     color: white;
 }
 
@@ -236,7 +233,7 @@ body {
 
 .stock-ticker {
     font-weight: bold;
-    color: #2980b9;
+    color: #1e3a5f;
 }
 
 /* Recent Trades */
@@ -244,7 +241,7 @@ body {
     padding: 12px;
     margin: 4px 0;
     border-radius: 8px;
-    border-left: 4px solid #3498db;
+    border-left: 4px solid #1e3a5f;
 }
 
 .trade-header {
@@ -253,7 +250,7 @@ body {
 
 .trade-time {
     font-weight: bold;
-    color: #3498db;
+    color: #1e3a5f;
 }
 
 .trade-stock {
@@ -297,7 +294,7 @@ body {
 }
 
 .footer a {
-    color: #3498db;
+    color: #1e3a5f;
     text-decoration: none;
 }
 

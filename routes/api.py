@@ -313,3 +313,36 @@ def get_stats():
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/provider-status')
+def get_provider_status():
+    """Get current price provider status and quota info"""
+    try:
+        pm = current_app.portfolio_manager
+        provider = pm.provider
+
+        status = {
+            'provider': provider.get_provider_name(),
+            'is_healthy': True,
+            'cooldown_seconds': pm._cooldown_seconds,
+        }
+
+        # Add quota info if provider supports it (Alpha Vantage)
+        if hasattr(provider, 'get_quota_status'):
+            status['quota'] = provider.get_quota_status()
+
+        # Check if market is open
+        try:
+            status['market_open'] = provider.is_market_open()
+        except Exception:
+            status['market_open'] = None
+
+        return jsonify(status)
+
+    except Exception as e:
+        return jsonify({
+            'provider': 'unknown',
+            'is_healthy': False,
+            'error': str(e)
+        }), 500

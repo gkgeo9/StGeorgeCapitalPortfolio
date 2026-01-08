@@ -1,10 +1,9 @@
 # portfolio_manager.py
 """
-Core portfolio management logic with validation from CSV logger.
-Handles calculations, statistics, and portfolio operations using database.
+Core portfolio management logic with provider abstraction.
+Now uses pluggable price providers (yfinance OR Alpha Vantage).
 """
 
-import yfinance as yf
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta, timezone
@@ -12,15 +11,17 @@ from typing import Dict, List, Optional, Tuple
 import time
 from sqlalchemy import func, desc
 from models import db, Price, Trade, Snapshot, PortfolioConfig
+from providers import PriceDataService
 
 
 class PortfolioManager:
-    """Manages portfolio operations and calculations with validation"""
+    """Manages portfolio operations with pluggable price providers"""
 
     def __init__(self, app=None):
         self.app = app
         self._last_backfill_ts = None
-        self._cooldown_seconds = 60  # 1 minute cooldown for manual backfill
+        self._cooldown_seconds = 60  # Default, will be overridden by config
+        self.provider = None  # Will be initialized in init_app
         if app:
             self.init_app(app)
 
@@ -32,21 +33,19 @@ class PortfolioManager:
         self.shares_per_trade = app.config['SHARES_PER_TRADE']
         self.max_retries = app.config['YFINANCE_MAX_RETRIES']
         self.retry_delay = app.config['YFINANCE_RETRY_DELAY']
+        self._cooldown_seconds = app.config.get('MANUAL_REFRESH_COOLDOWN', 60)
+
+        # Initialize price provider (auto-selects based on config/env)
+        self.provider = PriceDataService.create_provider(app.config)
+        print(f"  Portfolio Manager using: {self.provider.get_provider_name()}")
 
     # ========================================
-    # VALIDATION METHODS (from Daniel's CSV logger)
+    # VALIDATION METHODS (delegated to provider)
     # ========================================
 
     def _validate_tickers(self, tickers: List[str]) -> List[str]:
-        """Validate and clean ticker list"""
-        if not isinstance(tickers, list) or not tickers:
-            raise ValueError("tickers must be a non-empty list")
-        clean = []
-        for t in tickers:
-            if not isinstance(t, str) or not t.strip():
-                raise ValueError(f"Invalid ticker: {t!r}")
-            clean.append(t.strip().upper())
-        return list(dict.fromkeys(clean))  # Remove duplicates, preserve order
+        """Delegate to provider"""
+        return self.provider._validate_tickers(tickers)
 
     def _assert_action(self, action: str, ticker: str) -> None:
         """Validate trade action"""
@@ -70,15 +69,8 @@ class PortfolioManager:
             raise ValueError(f"[{ticker}] position_after cannot be negative")
 
     def _assert_price(self, price: float, ticker: str, context: str) -> None:
-        """Validate stock price"""
-        if pd.isna(price):
-            raise ValueError(f"[{ticker}] price is NaN in {context}")
-        try:
-            p = float(price)
-        except Exception:
-            raise ValueError(f"[{ticker}] invalid price in {context}")
-        if p <= 0:
-            raise ValueError(f"[{ticker}] price must be > 0 in {context}")
+        """Delegate to provider"""
+        self.provider._assert_price(price, ticker, context)
 
     def _assert_cash(self, cash_after: float) -> None:
         """Validate cash balance"""
@@ -107,65 +99,33 @@ class PortfolioManager:
                 print(f"✓ Initialized portfolio with ${self.initial_cash:,.2f}")
 
     # ========================================
-    # PRICE FETCHING
+    # PRICE FETCHING (now uses provider)
     # ========================================
 
     def get_current_prices(self, use_cache=True) -> Dict[str, float]:
         """
-        Get current prices for all stocks.
-        With rate limit handling and database fallback.
+        Get current prices using configured provider.
+        Falls back to database cache if provider fails.
         """
-        prices = {}
+        try:
+            # Use provider to get prices
+            prices = self.provider.get_current_prices(self.stocks)
 
-        for attempt in range(self.max_retries):
-            try:
-                if attempt > 0:
-                    time.sleep(self.retry_delay * (2 ** attempt))
+            # Check for None values (failed fetches)
+            failed = [ticker for ticker, price in prices.items() if price is None]
 
-                for stock in self.stocks:
-                    try:
-                        ticker = yf.Ticker(stock)
-                        hist = ticker.history(period='1d')
+            if failed and use_cache:
+                print(f"  Some tickers failed: {failed}, using database cache...")
+                prices = self._get_prices_from_db(prices)
 
-                        if not hist.empty:
-                            price = float(hist['Close'].iloc[-1])
-                            self._assert_price(price, stock, "get_current_prices")
-                            prices[stock] = price
-                        else:
-                            info = ticker.info
-                            price = float(info.get('regularMarketPrice', 0))
-                            if price <= 0:
-                                raise ValueError("Invalid price from info")
-                            self._assert_price(price, stock, "get_current_prices")
-                            prices[stock] = price
+            return prices
 
-                        time.sleep(0.2)
-
-                    except Exception as e:
-                        if "429" in str(e):
-                            raise
-                        print(f"  Warning: Could not fetch {stock}: {e}")
-                        prices[stock] = None
-
-                if all(v is not None for v in prices.values()):
-                    return prices
-
-                if use_cache:
-                    prices = self._get_prices_from_db(prices)
-                    return prices
-
-                return prices
-
-            except Exception as e:
-                if "429" in str(e) and attempt < self.max_retries - 1:
-                    print(f"  Rate limit hit, retrying in {self.retry_delay * (2 ** attempt)}s...")
-                    continue
-                else:
-                    print(f"  Error fetching prices, using database fallback: {e}")
-                    if use_cache:
-                        return self._get_prices_from_db()
-
-        return self._get_prices_from_db()
+        except Exception as e:
+            print(f"  Provider error: {e}")
+            if use_cache:
+                print(f"  Falling back to database cache...")
+                return self._get_prices_from_db()
+            raise
 
     def _get_prices_from_db(self, partial_prices: Dict[str, float] = None) -> Dict[str, float]:
         """Get latest prices from database as fallback"""
@@ -180,18 +140,30 @@ class PortfolioManager:
                 if latest_price:
                     prices[stock] = float(latest_price.close)
                 else:
-                    prices[stock] = 100.0
+                    # Return 0.0 instead of hardcoded $100 - this indicates missing data
+                    prices[stock] = 0.0
+                    print(f"  WARNING: No price data available for {stock} - using $0.00")
 
         return prices
 
+    def _get_fallback_price_from_db(self, ticker: str) -> float:
+        """Get fallback price from database for a single ticker"""
+        latest_price = Price.query.filter_by(ticker=ticker) \
+            .order_by(desc(Price.timestamp)) \
+            .first()
+
+        if latest_price:
+            return float(latest_price.close)
+        return 0.0
+
     # ========================================
-    # BACKFILL (with cooldown from Daniel's approach)
+    # BACKFILL (now uses provider)
     # ========================================
 
     def manual_backfill(self, default_lookback_days: int = 7) -> Tuple[bool, str]:
         """
         Manual backfill triggered by user button.
-        Has cooldown to avoid yfinance rate limits.
+        Has cooldown to avoid rate limits.
         Returns (success, message)
         """
         now = datetime.now(timezone.utc)
@@ -203,18 +175,14 @@ class PortfolioManager:
                 remaining = int(self._cooldown_seconds - elapsed)
                 return False, f"⏳ Cooldown active. Please wait {remaining} seconds before refreshing again."
 
-        # Determine date range - FIX: ensure we're working with date objects consistently
+        # Determine date range
         today = now.date()
-
-        # Find last logged date
         last_datetime = self._last_logged_day()
 
         if last_datetime is None:
-            # No data exists - backfill from lookback period
             start_date = today - timedelta(days=default_lookback_days)
             message_prefix = "Initial backfill"
         else:
-            # Convert datetime to date for comparison
             last_date = last_datetime.date() if isinstance(last_datetime, datetime) else last_datetime
             start_date = last_date + timedelta(days=1)
 
@@ -222,7 +190,6 @@ class PortfolioManager:
                 return False, "✓ Already up to date"
             message_prefix = "Incremental backfill"
 
-        # Convert end_date to ensure compatibility
         end_date = today + timedelta(days=1)
 
         # Run backfill
@@ -244,17 +211,17 @@ class PortfolioManager:
         """Get the most recent datetime we have price data for"""
         latest = db.session.query(func.max(Price.timestamp)).scalar()
         if latest:
-            # Return as datetime with time zeroed out for date comparison
             return latest.replace(hour=0, minute=0, second=0, microsecond=0)
         return None
 
     def backfill_prices(self, start_date, end_date, note: str = "backfill") -> Dict:
         """
-        Backfill historical price data from yfinance.
+        Backfill historical price data using configured provider.
         Returns dict with success status and counts.
         """
         print(f"\n{'=' * 60}")
         print(f"BACKFILLING PRICE DATA")
+        print(f"Using provider: {self.provider.get_provider_name()}")
         print(f"{'=' * 60}\n")
 
         result = {
@@ -263,39 +230,25 @@ class PortfolioManager:
             'error': None
         }
 
-        # Convert dates to strings for yfinance
-        start_str = start_date.strftime('%Y-%m-%d') if hasattr(start_date, 'strftime') else str(start_date)
-        end_str = end_date.strftime('%Y-%m-%d') if hasattr(end_date, 'strftime') else str(end_date)
-
         for stock in self.stocks:
             try:
-                print(f"[{stock}] Fetching from {start_str} to {end_str}...")
+                print(f"[{stock}] Fetching historical data...")
 
-                ticker = yf.Ticker(stock)
-                hist = ticker.history(
-                    start=start_str,
-                    end=end_str,
-                    interval='1d',
-                    auto_adjust=False
-                )
+                # Use provider to get historical data
+                df = self.provider.get_historical_prices(stock, start_date, end_date)
 
-                if hist.empty:
+                if df.empty:
                     print(f"[{stock}] No data returned")
                     result['counts'][stock] = 0
                     continue
 
                 count = 0
-                for timestamp, row in hist.iterrows():
+                for _, row in df.iterrows():
                     try:
-                        close_price = float(row['Close'])
-                        self._assert_price(close_price, stock, "backfill")
-
-                        ts = timestamp.to_pydatetime().replace(tzinfo=timezone.utc)
-
                         event_id = Price.generate_event_id(
                             ticker=stock,
-                            timestamp=ts,
-                            close=close_price,
+                            timestamp=row['timestamp'],
+                            close=row['close'],
                             kind='HISTORY',
                             note=note
                         )
@@ -307,14 +260,14 @@ class PortfolioManager:
                         price = Price(
                             event_id=event_id,
                             ticker=stock,
-                            timestamp=ts,
-                            close=close_price,
-                            open=float(row['Open']),
-                            high=float(row['High']),
-                            low=float(row['Low']),
-                            volume=int(row['Volume']),
+                            timestamp=row['timestamp'],
+                            close=row['close'],
+                            open=row.get('open'),
+                            high=row.get('high'),
+                            low=row.get('low'),
+                            volume=row.get('volume'),
                             kind='HISTORY',
-                            price_source='yfinance',
+                            price_source=self.provider.get_provider_name(),
                             out_of_order=False,
                             note=note
                         )
@@ -329,8 +282,6 @@ class PortfolioManager:
                 db.session.commit()
                 result['counts'][stock] = count
                 print(f"[{stock}] Added {count} new price records")
-
-                time.sleep(0.5)
 
             except Exception as e:
                 print(f"[{stock}] Error during backfill: {e}")
@@ -347,7 +298,7 @@ class PortfolioManager:
         return result
 
     # ========================================
-    # TRADING
+    # TRADING (unchanged)
     # ========================================
 
     def record_trade(self, ticker: str, action: str, quantity: int, price: float, note: str = ""):
@@ -405,7 +356,7 @@ class PortfolioManager:
         return trade
 
     # ========================================
-    # SNAPSHOTS
+    # SNAPSHOTS (unchanged)
     # ========================================
 
     def take_snapshot(self, note: str = "manual snapshot"):
@@ -424,7 +375,6 @@ class PortfolioManager:
         for stock in self.stocks:
             event_id = Snapshot.generate_event_id(timestamp, stock, positions[stock])
 
-            # Check if already exists
             existing = Snapshot.query.filter_by(event_id=event_id).first()
             if existing:
                 continue
@@ -446,7 +396,7 @@ class PortfolioManager:
         return {'success': True, 'portfolio_value': portfolio_value}
 
     # ========================================
-    # PORTFOLIO CALCULATIONS
+    # PORTFOLIO CALCULATIONS (unchanged)
     # ========================================
 
     def get_current_positions(self) -> Dict[str, int]:
@@ -490,7 +440,14 @@ class PortfolioManager:
 
         for stock in self.stocks:
             shares = positions[stock]
-            price = prices[stock]
+            price = prices.get(stock)
+
+            # Handle None prices gracefully
+            if price is None:
+                price = self._get_fallback_price_from_db(stock)
+                if price == 0.0 and shares > 0:
+                    print(f"  WARNING: No price for {stock} with {shares} shares - value will be $0")
+
             value = shares * price
 
             stock_values[stock] = {

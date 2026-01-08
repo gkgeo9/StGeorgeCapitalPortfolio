@@ -61,3 +61,7 @@ htmlcov/
 
 # Deployment
 *.pid
+
+/.claude
+/.idea
+/.venv

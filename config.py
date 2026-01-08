@@ -1,7 +1,7 @@
 # config.py
 """
 Configuration settings for the Flask application.
-Handles database connections, secret keys, and environment-specific settings.
+Handles database connections, secret keys, and price provider selection.
 """
 
 import os
@@ -40,10 +40,28 @@ class Config:
     BACKFILL_INTERVAL_HOURS = None  # Disabled
     SNAPSHOT_INTERVAL_HOURS = None  # Disabled
 
-    # yfinance settings
+    # ========================================
+    # PRICE PROVIDER CONFIGURATION
+    # ========================================
+
+    # Provider selection:
+    # - 'auto': Use Alpha Vantage if ALPHA_VANTAGE_API_KEY exists, else yfinance
+    # - 'yfinance': Force yfinance (good for local dev)
+    # - 'alphavantage': Force Alpha Vantage (good for production)
+    PRICE_PROVIDER = os.environ.get('PRICE_PROVIDER', 'auto')
+
+    # yfinance settings (used when yfinance is selected)
     YFINANCE_MAX_RETRIES = 3
     YFINANCE_RETRY_DELAY = 5  # seconds
+    YFINANCE_REQUEST_DELAY = 0.5  # seconds between requests
     YFINANCE_BACKFILL_DAYS = 7  # Default lookback for manual refresh
+
+    # Alpha Vantage settings (used when Alpha Vantage is selected)
+    # API key comes from environment variable: ALPHA_VANTAGE_API_KEY
+    # Set ALPHA_VANTAGE_PAID_TIER=true if you have paid subscription
+
+    # Manual refresh cooldown (seconds between refresh button clicks)
+    MANUAL_REFRESH_COOLDOWN = int(os.environ.get('MANUAL_REFRESH_COOLDOWN', 60))
 
     # Session settings
     PERMANENT_SESSION_LIFETIME = timedelta(days=7)
@@ -53,18 +71,23 @@ class DevelopmentConfig(Config):
     """Development configuration"""
     DEBUG = True
     TESTING = False
+    # Force yfinance for local development (works fine locally)
+    PRICE_PROVIDER = 'yfinance'
 
 
 class ProductionConfig(Config):
     """Production configuration"""
     DEBUG = False
     TESTING = False
+    # Auto-detect provider (will use Alpha Vantage if key exists)
+    PRICE_PROVIDER = 'auto'
 
 
 class TestingConfig(Config):
     """Testing configuration"""
     TESTING = True
     SQLALCHEMY_DATABASE_URI = 'sqlite:///:memory:'
+    PRICE_PROVIDER = 'yfinance'  # Use yfinance for tests
 
 
 # Configuration dictionary
