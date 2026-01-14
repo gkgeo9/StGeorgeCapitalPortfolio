@@ -28,7 +28,8 @@ class PortfolioManager:
     def init_app(self, app):
         """Initialize with Flask app context"""
         self.app = app
-        self.stocks = app.config['PORTFOLIO_STOCKS']
+        self.stocks = [] # Deprecated, use get_tracked_stocks()
+        self.default_stocks = app.config.get('DEFAULT_PORTFOLIO_STOCKS', [])
         self.initial_cash = app.config['INITIAL_CASH']
         self.shares_per_trade = app.config['SHARES_PER_TRADE']
         self.max_retries = app.config['YFINANCE_MAX_RETRIES']
@@ -87,6 +88,32 @@ class PortfolioManager:
         return "'" + s if s[:1] in ("=", "+", "-", "@") else s
 
     # ========================================
+    # DYNAMIC STOCK MANAGEMENT
+    # ========================================
+
+    def get_tracked_stocks(self) -> List[str]:
+        """
+        Get list of all stocks currently tracked in the portfolio.
+        Combines default stocks (if DB empty) with any stocks present in positions or history.
+        """
+        # Get stocks from trades (positions)
+        trade_tickers = db.session.query(Trade.ticker).distinct().all()
+        trade_tickers = [t[0] for t in trade_tickers]
+
+        # Get stocks from price history
+        price_tickers = db.session.query(Price.ticker).distinct().all()
+        price_tickers = [t[0] for t in price_tickers]
+
+        # Combine unique tickers
+        all_tickers = set(trade_tickers + price_tickers)
+
+        # If database is empty, return defaults
+        if not all_tickers:
+            return self.default_stocks
+
+        return sorted(list(all_tickers))
+
+    # ========================================
     # INITIALIZATION
     # ========================================
 
@@ -130,8 +157,9 @@ class PortfolioManager:
     def _get_prices_from_db(self, partial_prices: Dict[str, float] = None) -> Dict[str, float]:
         """Get latest prices from database as fallback"""
         prices = partial_prices if partial_prices else {}
+        stocks = self.get_tracked_stocks()
 
-        for stock in self.stocks:
+        for stock in stocks:
             if prices.get(stock) is None:
                 latest_price = Price.query.filter_by(ticker=stock) \
                     .order_by(desc(Price.timestamp)) \
@@ -190,7 +218,7 @@ class PortfolioManager:
                 return False, "✓ Already up to date"
             message_prefix = "Incremental backfill"
 
-        end_date = today + timedelta(days=1)
+        end_date = today
 
         # Run backfill
         result = self.backfill_prices(
@@ -230,7 +258,8 @@ class PortfolioManager:
             'error': None
         }
 
-        for stock in self.stocks:
+        stocks = self.get_tracked_stocks()
+        for stock in stocks:
             try:
                 print(f"[{stock}] Fetching historical data...")
 
@@ -369,10 +398,11 @@ class PortfolioManager:
 
         timestamp = datetime.now(timezone.utc)
 
-        stock_value = sum(positions[stock] * prices[stock] for stock in self.stocks)
+        stocks = self.get_tracked_stocks()
+        stock_value = sum(positions.get(stock, 0) * prices.get(stock, 0) for stock in stocks)
         portfolio_value = stock_value + cash_balance
 
-        for stock in self.stocks:
+        for stock in stocks:
             event_id = Snapshot.generate_event_id(timestamp, stock, positions[stock])
 
             existing = Snapshot.query.filter_by(event_id=event_id).first()
@@ -401,7 +431,8 @@ class PortfolioManager:
 
     def get_current_positions(self) -> Dict[str, int]:
         """Get current stock positions by calculating from all trades"""
-        positions = {stock: 0 for stock in self.stocks}
+        stocks = self.get_tracked_stocks()
+        positions = {stock: 0 for stock in stocks}
 
         trades = Trade.query.order_by(Trade.timestamp).all()
 
@@ -438,7 +469,8 @@ class PortfolioManager:
         stock_values = {}
         total_stock_value = 0
 
-        for stock in self.stocks:
+        stocks = self.get_tracked_stocks()
+        for stock in stocks:
             shares = positions[stock]
             price = prices.get(stock)
 
@@ -562,7 +594,8 @@ class PortfolioManager:
         best_return = -float('inf')
         worst_return = float('inf')
 
-        for stock in self.stocks:
+        stocks = self.get_tracked_stocks()
+        for stock in stocks:
             first_price = Price.query.filter_by(ticker=stock) \
                 .order_by(Price.timestamp) \
                 .first()

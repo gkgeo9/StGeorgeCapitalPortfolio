@@ -69,7 +69,10 @@ class BasePriceProvider(ABC):
         """Validate date/timestamp"""
         if not isinstance(dt, (datetime, date)):
             raise ValueError(f"[{ticker}] invalid date type in {context}")
-        if dt > datetime.now():
+        # Handle timezone awareness
+        now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
+        
+        if dt > now:
             raise ValueError(f"[{ticker}] date cannot be in future in {context}")
 
     # ========================================

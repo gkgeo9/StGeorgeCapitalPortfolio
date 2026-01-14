@@ -121,9 +121,9 @@ def execute_trade():
         price = float(data['price'])
         note = data.get('note', '')
 
-        # Validate ticker
-        if ticker not in current_app.config['PORTFOLIO_STOCKS']:
-            return jsonify({'error': f'Invalid ticker: {ticker}'}), 400
+        # Validate ticker (basic check)
+        if not ticker or len(ticker) > 5:
+            return jsonify({'error': f'Invalid ticker format: {ticker}'}), 400
 
         # Validate action
         if action not in ['BUY', 'SELL']:
@@ -272,7 +272,7 @@ def get_all_stocks():
 
         stocks_data = {}
 
-        for ticker in current_app.config['PORTFOLIO_STOCKS']:
+        for ticker in current_app.portfolio_manager.get_tracked_stocks():
             prices = Price.query.filter(
                 Price.ticker == ticker,
                 Price.timestamp >= cutoff
@@ -304,7 +304,7 @@ def get_stats():
             'total_prices': Price.query.count(),
             'total_trades': Trade.query.count(),
             'total_snapshots': Snapshot.query.count(),
-            'stocks_tracked': len(current_app.config['PORTFOLIO_STOCKS']),
+            'stocks_tracked': len(pm.get_tracked_stocks()),
             'current_cash': round(cash, 2),
             'current_positions': positions,
             'oldest_price': oldest_price.timestamp.isoformat() if oldest_price else None,

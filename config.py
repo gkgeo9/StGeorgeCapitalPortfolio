@@ -31,7 +31,8 @@ class Config:
     }
 
     # Portfolio settings
-    PORTFOLIO_STOCKS = ['NVDA', 'MSFT', 'AAPL', 'JPM', 'UNH']
+    # Default stocks to track if database is empty
+    DEFAULT_PORTFOLIO_STOCKS = ['NVDA', 'MSFT', 'AAPL', 'JPM', 'UNH']
     INITIAL_CASH = 100000
     SHARES_PER_TRADE = 100
 
@@ -71,8 +72,8 @@ class DevelopmentConfig(Config):
     """Development configuration"""
     DEBUG = True
     TESTING = False
-    # Force yfinance for local development (works fine locally)
-    PRICE_PROVIDER = 'yfinance'
+    # Allow environment override, default to yfinance for development
+    PRICE_PROVIDER = os.environ.get('PRICE_PROVIDER', 'yfinance')
 
 
 class ProductionConfig(Config):

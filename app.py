@@ -60,7 +60,9 @@ def create_app(config_name=None):
     print("=" * 60)
     print(f"Environment: {config_name}")
     print(f"Database: {app.config['SQLALCHEMY_DATABASE_URI'][:50]}...")  # Don't print full connection string
-    print(f"Stocks tracked: {', '.join(app.config['PORTFOLIO_STOCKS'])}")
+    with app.app_context():
+        stocks = portfolio_manager.get_tracked_stocks()
+        print(f"Stocks tracked: {', '.join(stocks)}")
     print("Update mode: MANUAL (via UI button)")
     print("=" * 60 + "\n")
 
