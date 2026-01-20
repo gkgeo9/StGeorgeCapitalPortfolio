@@ -8,7 +8,7 @@ Now includes manual refresh/backfill endpoints.
 from flask import Blueprint, jsonify, request, current_app
 from sqlalchemy import desc
 from models import db, Price, Trade, Snapshot
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 api_bp = Blueprint('api', __name__)
 
@@ -38,7 +38,7 @@ def get_portfolio():
             'total_pnl': round(stats['total_pnl'], 2),
             'pnl_percent': round(stats['pnl_percent'], 2),
             'holdings': holdings,
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': datetime.now(timezone.utc).isoformat()
         })
 
     except Exception as e:
@@ -71,7 +71,7 @@ def manual_refresh():
             'success': True,
             'message': message,
             'portfolio_value': round(snapshot_result['portfolio_value'], 2),
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': datetime.now(timezone.utc).isoformat()
         })
 
     except Exception as e:
@@ -94,7 +94,7 @@ def take_snapshot():
             'success': True,
             'message': 'Snapshot saved successfully',
             'portfolio_value': round(result['portfolio_value'], 2),
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': datetime.now(timezone.utc).isoformat()
         })
 
     except Exception as e:
@@ -247,7 +247,7 @@ def get_stock_prices(ticker):
     """Get price history for a specific stock"""
     try:
         days = request.args.get('days', 90, type=int)
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
         prices = Price.query.filter(
             Price.ticker == ticker.upper(),
@@ -269,7 +269,7 @@ def get_all_stocks():
     """Get price history for all tracked stocks"""
     try:
         days = request.args.get('days', 90, type=int)
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
         stocks_data = {}
 

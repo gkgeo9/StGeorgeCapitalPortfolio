@@ -387,7 +387,7 @@ class AlphaVantageProvider:
         if not isinstance(dt, (datetime, date)):
             raise ValueError(f"[{ticker}] invalid date type in {context}")
         now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
-        if dt > now:
+        if dt > now + timedelta(days=1):
             raise ValueError(f"[{ticker}] date cannot be in future in {context}")
 
     def validate_price_data(self, df: pd.DataFrame, ticker: str) -> pd.DataFrame:
