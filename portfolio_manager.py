@@ -117,31 +117,37 @@ class PortfolioManager:
                 print(f"✓ Initialized portfolio with ${self.initial_cash:,.2f}")
 
     # ========================================
-    # PRICE FETCHING (now uses provider)
+    # PRICE FETCHING
     # ========================================
 
-    def get_current_prices(self, use_cache=True) -> Dict[str, float]:
+    def get_prices_from_db(self) -> Dict[str, float]:
         """
-        Get current prices using Alpha Vantage.
-        Falls back to database cache if provider fails.
+        Get latest prices from DATABASE ONLY - NO API CALLS.
+        Used for displaying portfolio data without hitting rate limits.
+        """
+        return self._get_prices_from_db()
+
+    def fetch_live_prices(self) -> Dict[str, float]:
+        """
+        Fetch LIVE prices from Alpha Vantage API.
+        ONLY called during manual refresh - NEVER automatically.
         """
         stocks = self.get_tracked_stocks()
+        print(f"  Fetching live prices for {len(stocks)} stocks...")
         try:
             prices = self.provider.get_current_prices(stocks)
 
             failed = [ticker for ticker, price in prices.items() if price is None]
-            if failed and use_cache:
-                print(f"  Some tickers failed: {failed}, using database cache...")
+            if failed:
+                print(f"  Some tickers failed: {failed}, filling from database...")
                 prices = self._get_prices_from_db(prices)
 
             return prices
 
         except Exception as e:
             print(f"  Provider error: {e}")
-            if use_cache:
-                print(f"  Falling back to database cache...")
-                return self._get_prices_from_db()
-            raise
+            print(f"  Falling back to database cache...")
+            return self._get_prices_from_db()
 
     def _get_prices_from_db(self, partial_prices: Dict[str, float] = None) -> Dict[str, float]:
         """Get latest prices from database as fallback"""
@@ -177,11 +183,10 @@ class PortfolioManager:
     # BACKFILL (now uses provider)
     # ========================================
 
-    def manual_backfill(self, default_lookback_days: int = 7) -> Tuple[bool, str]:
+    def manual_backfill(self, default_lookback_days: int = 365) -> Tuple[bool, str]:
         """
         Manual backfill triggered by user button.
-        Has cooldown to avoid rate limits.
-        Returns (success, message)
+        Ensures ALL tracked stocks have at least 1 year of data.
         """
         now = datetime.now(timezone.utc)
 
@@ -192,37 +197,91 @@ class PortfolioManager:
                 remaining = int(self._cooldown_seconds - elapsed)
                 return False, f"⏳ Cooldown active. Please wait {remaining} seconds before refreshing again."
 
-        # Determine date range
-        today = now.date()
-        last_datetime = self._last_logged_day()
+        print(f"\n{'=' * 60}")
+        print(f"STARTING MANUAL BACKFILL")
+        print(f"{'=' * 60}")
 
-        if last_datetime is None:
-            start_date = today - timedelta(days=default_lookback_days)
-            message_prefix = "Initial backfill"
-        else:
-            last_date = last_datetime.date() if isinstance(last_datetime, datetime) else last_datetime
-            start_date = last_date + timedelta(days=1)
+        stocks = self.get_tracked_stocks()
+        if not stocks:
+            return True, "No stocks to backfill."
 
-            if start_date > today:
-                return False, "✓ Already up to date"
-            message_prefix = "Incremental backfill"
+        total_added = 0
+        errors = []
 
-        end_date = today
+        year_ago = now - timedelta(days=365)
+        # Buffer to capture partial years that are 'close enough' but we want full year
+        # Actually, let's just be strict: if min_date > year_ago + 5 days, fetch history.
 
-        # Run backfill
-        result = self.backfill_prices(
-            start_date=start_date,
-            end_date=end_date,
-            note="manual backfill"
-        )
+        for stock in stocks:
+            try:
+                # 1. Get current data range for this stock
+                min_ts = db.session.query(func.min(Price.timestamp)).filter_by(ticker=stock).scalar()
+                max_ts = db.session.query(func.max(Price.timestamp)).filter_by(ticker=stock).scalar()
+                
+                # Make timezone aware if needed (DB usually returns naive if not careful, but let's assume UTC)
+                if min_ts and min_ts.tzinfo is None: min_ts = min_ts.replace(tzinfo=timezone.utc)
+                if max_ts and max_ts.tzinfo is None: max_ts = max_ts.replace(tzinfo=timezone.utc)
+
+                start_date = None
+                end_date = now.date()
+                
+                # Logic:
+                # Case A: No data -> Backfill 1 year
+                # Case B: Data is old (max_ts < yesterday) -> Update to today
+                # Case C: Data is recent but not enough history (min_ts > year_ago) -> Backfill to year_ago
+
+                fetch_needed = False
+                
+                if not min_ts or not max_ts:
+                    print(f"[{stock}] No data found. Scheduling full backfill.")
+                    start_date = year_ago.date()
+                    fetch_needed = True
+                
+                else:
+                    # Check if we need recent data
+                    if max_ts.date() < (now - timedelta(days=1)).date():
+                         print(f"[{stock}] Data stale (last: {max_ts.date()}). Updating...")
+                         # We can just fetch from max_ts to now. 
+                         # BUT if we ALSo need history, we should just do one big fetch or two?
+                         # AlphaVantage 'full' gives everything. 'compact' gives 100 days.
+                         # If we request start_date=year_ago, provider logic handles 'full' vs 'compact'.
+                         start_date = max_ts.date() + timedelta(days=1)
+                         fetch_needed = True
+
+                    # Check if we need MORE history
+                    # If existing history starts AFTER year_ago (plus small buffer), we need older data.
+                    if min_ts > (year_ago + timedelta(days=5)):
+                         print(f"[{stock}] Insufficient history (starts: {min_ts.date()}). Extending back to {year_ago.date()}...")
+                         start_date = year_ago.date() # This overrides the "update only" start date, which is good.
+                         fetch_needed = True
+
+                if fetch_needed:
+                    result = self.backfill_prices(
+                        start_date=start_date,
+                        end_date=end_date,
+                        note="manual backfill",
+                        ticker_specific=stock # Optimization: Only pass this stock to backfill_prices
+                    )
+                    
+                    if result['success']:
+                         count = result['counts'].get(stock, 0)
+                         total_added += count
+                    else:
+                        errors.append(f"{stock}: {result.get('error')}")
+
+                else:
+                    print(f"[{stock}] Data is up to date (Range: {min_ts.date()} to {max_ts.date()})")
+
+            except Exception as e:
+                print(f"[{stock}] Error determining backfill needs: {e}")
+                errors.append(f"{stock}: {str(e)}")
 
         self._last_backfill_ts = now
 
-        if result['success']:
-            total_added = sum(result['counts'].values())
-            return True, f"✓ {message_prefix}: Added {total_added} price records"
-        else:
-            return False, f"⚠️ Backfill failed: {result.get('error', 'Unknown error')}"
+        msg = f"✓ Updated data. Added {total_added} records."
+        if errors:
+            msg += f" (Errors: {', '.join(errors[:3])}...)"
+        return True, msg
 
     def _last_logged_day(self) -> Optional[datetime]:
         """Get the most recent datetime we have price data for"""
@@ -231,15 +290,15 @@ class PortfolioManager:
             return latest.replace(hour=0, minute=0, second=0, microsecond=0)
         return None
 
-    def backfill_prices(self, start_date, end_date, note: str = "backfill") -> Dict:
+    def backfill_prices(self, start_date, end_date, note: str = "backfill", ticker_specific: str = None) -> Dict:
         """
         Backfill historical price data using configured provider.
         Returns dict with success status and counts.
         """
-        print(f"\n{'=' * 60}")
-        print(f"BACKFILLING PRICE DATA")
-        print(f"Using provider: {self.provider.get_provider_name()}")
-        print(f"{'=' * 60}\n")
+        # print(f"\n{'=' * 60}")
+        # print(f"BACKFILLING PRICE DATA")
+        # print(f"Using provider: {self.provider.get_provider_name()}")
+        # print(f"{'=' * 60}\n")
 
         result = {
             'success': True,
@@ -247,7 +306,11 @@ class PortfolioManager:
             'error': None
         }
 
-        stocks = self.get_tracked_stocks()
+        if ticker_specific:
+            stocks = [ticker_specific]
+        else:
+            stocks = self.get_tracked_stocks()
+            
         for stock in stocks:
             try:
                 print(f"[{stock}] Fetching historical data...")
@@ -319,7 +382,7 @@ class PortfolioManager:
     # TRADING (unchanged)
     # ========================================
 
-    def record_trade(self, ticker: str, action: str, quantity: int, price: float, note: str = ""):
+    def record_trade(self, ticker: str, action: str, quantity: int, price: float, note: str = "", timestamp: datetime = None):
         """Record a trade in the database with full validation"""
         # Validate inputs
         self._assert_action(action, ticker)
@@ -328,6 +391,23 @@ class PortfolioManager:
 
         if action not in ['BUY', 'SELL']:
             raise ValueError(f"Invalid action: {action}")
+
+        # Use current time if no timestamp provided
+        if timestamp is None:
+            timestamp = datetime.now(timezone.utc)
+        
+        # Validation for backdated sells: Cannot sell before first purchase
+        if action == 'SELL':
+            first_buy = Trade.query.filter_by(ticker=ticker, action='BUY').order_by(Trade.timestamp).first()
+            if first_buy and timestamp < first_buy.timestamp:
+                 # Check if the date is earlier (ignoring time for user friendliness if needed, 
+                 # but strictly timestamp comparison is safer for data integrity)
+                 raise ValueError(f"Cannot sell before first purchase on {first_buy.timestamp.strftime('%Y-%m-%d')}")
+            
+            # If there are NO buys, it implies we are selling something we don't have record of buying.
+            # This is generally allowed in this system if we assume initial balances or such, 
+            # but strictly speaking it's odd. However, for "sell date earlier than buy date" check,
+            # we only care if a buy EXISTS and is LATER than this sell.
 
         total_cost = quantity * price
 
@@ -348,7 +428,6 @@ class PortfolioManager:
         self._assert_position(position_after, ticker, action, quantity)
         self._assert_cash(cash_after)
 
-        timestamp = datetime.now(timezone.utc)
         event_id = Trade.generate_event_id(timestamp, ticker, action, quantity, price)
 
         trade = Trade(
@@ -369,7 +448,7 @@ class PortfolioManager:
         db.session.add(trade)
         db.session.commit()
 
-        print(f"✓ Recorded {action}: {quantity} {ticker} @ ${price:.2f} = ${total_cost:,.2f}")
+        print(f"✓ Recorded {action}: {quantity} {ticker} @ ${price:.2f} = ${total_cost:,.2f} on {timestamp.strftime('%Y-%m-%d')}")
 
         return trade
 
@@ -378,10 +457,11 @@ class PortfolioManager:
     # ========================================
 
     def take_snapshot(self, note: str = "manual snapshot"):
-        """Take a snapshot of current portfolio state"""
+        """Take a snapshot of current portfolio state using DATABASE prices only (no API calls)."""
         print(f"\n📸 Taking portfolio snapshot...")
 
-        prices = self.get_current_prices()
+        # Use database prices ONLY - no API calls
+        prices = self.get_prices_from_db()
         positions = self.get_current_positions()
         cash_balance = self.get_cash_balance()
 
@@ -449,8 +529,9 @@ class PortfolioManager:
         return cash
 
     def calculate_portfolio_stats(self) -> Dict:
-        """Calculate comprehensive portfolio statistics"""
-        prices = self.get_current_prices()
+        """Calculate portfolio statistics using DATABASE prices only (no API calls)."""
+        # Use database prices ONLY - no API calls
+        prices = self.get_prices_from_db()
         positions = self.get_current_positions()
         cash = self.get_cash_balance()
         initial_value = float(PortfolioConfig.get_value('initial_cash', self.initial_cash))

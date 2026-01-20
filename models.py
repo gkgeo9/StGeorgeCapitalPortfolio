@@ -4,7 +4,7 @@ Database models for portfolio tracking system.
 Enhanced with audit fields and validation from CSV logger approach.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import Index
 import hashlib
@@ -31,7 +31,7 @@ class Price(db.Model):
     price_source = db.Column(db.String(50), default='yfinance')  # yfinance, user, alpha_vantage
     out_of_order = db.Column(db.Boolean, default=False)
     note = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         Index('idx_ticker_timestamp', 'ticker', 'timestamp'),
@@ -84,7 +84,7 @@ class Trade(db.Model):
     cash_before = db.Column(db.Numeric(12, 2))
     cash_after = db.Column(db.Numeric(12, 2), nullable=False)
     note = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         Index('idx_timestamp', 'timestamp'),
@@ -130,7 +130,7 @@ class Snapshot(db.Model):
     cash_balance = db.Column(db.Numeric(12, 2))
     portfolio_value = db.Column(db.Numeric(12, 2))
     note = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         Index('idx_snapshot_timestamp', 'timestamp'),
@@ -166,7 +166,7 @@ class PortfolioConfig(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     key = db.Column(db.String(50), unique=True, nullable=False)
     value = db.Column(db.Text, nullable=False)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     def __repr__(self):
         return f'<Config {self.key}={self.value}>'
@@ -190,7 +190,7 @@ class PortfolioConfig(db.Model):
         config = PortfolioConfig.query.filter_by(key=key).first()
         if config:
             config.value = str(value)
-            config.updated_at = datetime.utcnow()
+            config.updated_at = datetime.now(timezone.utc)
         else:
             config = PortfolioConfig(key=key, value=str(value))
             db.session.add(config)
