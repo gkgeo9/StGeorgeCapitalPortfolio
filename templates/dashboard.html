@@ -1,16 +1,17 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Investment Club Portfolio Dashboard</title>
-    
+
     <!-- Plotly.js for charts -->
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
-    
+
     <!-- Custom CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
-    
+
     <style>
         /* Manual Refresh Button */
         .refresh-btn {
@@ -195,6 +196,7 @@
         }
     </style>
 </head>
+
 <body>
     <div class="container">
         <!-- Header -->
@@ -298,13 +300,23 @@
             <form id="trade-form">
                 <div class="form-group">
                     <label for="stock-select">Stock Ticker</label>
-                    <input type="text" id="stock-select" list="stock-suggestions" placeholder="e.g. TSLA" required style="text-transform: uppercase;">
+                    <div style="display: flex; gap: 10px;">
+                        <input type="text" id="stock-select" list="stock-suggestions" placeholder="e.g. SHOP" required
+                            style="text-transform: uppercase; flex: 2;">
+                        <select id="exchange-select"
+                            style="flex: 1; padding: 12px; border: 2px solid #ecf0f1; border-radius: 8px;">
+                            <option value="US">US (NYSE/NAS)</option>
+                            <option value="TRT">Canada (TSX)</option>
+                            <option value="TRV">Canada (TSX-V)</option>
+                            <option value="LON">UK (LSE)</option>
+                        </select>
+                    </div>
                     <datalist id="stock-suggestions">
                         <option value="NVDA">NVDA - NVIDIA</option>
                         <option value="MSFT">MSFT - Microsoft</option>
                         <option value="AAPL">AAPL - Apple</option>
-                        <option value="JPM">JPM - JPMorgan Chase</option>
-                        <option value="UNH">UNH - UnitedHealth</option>
+                        <option value="SHOP">SHOP - Shopify (Select TSX for CAD)</option>
+                        <option value="RY">RY - Royal Bank (Select TSX for CAD)</option>
                     </datalist>
                 </div>
 
@@ -344,7 +356,7 @@
 
         // Update the loadPortfolio function to store prices
         const originalLoadPortfolio = loadPortfolio;
-        loadPortfolio = async function() {
+        loadPortfolio = async function () {
             await originalLoadPortfolio();
 
             // Fetch and store current prices
@@ -371,23 +383,43 @@
         }
 
         // Update price when stock is selected
-        document.getElementById('stock-select').addEventListener('change', function(e) {
-            const ticker = e.target.value;
+        document.getElementById('stock-select').addEventListener('change', function (e) {
+            let ticker = e.target.value.toUpperCase().trim();
+            // Try enabling "smart" price lookup? 
+            // For now, check if exact ticker exists in current prices
+            // Also check if adding the currently selected exchange suffix finds it
+
+            const exchange = document.getElementById('exchange-select').value;
+            let lookupTicker = ticker;
+            if (exchange !== 'US' && !ticker.includes('.')) {
+                lookupTicker = `${ticker}.${exchange}`;
+            }
+
             const priceInput = document.getElementById('price-input');
             const priceInfo = document.getElementById('current-price-info');
             const marketPrice = document.getElementById('market-price');
 
-            if (ticker && currentPrices[ticker]) {
-                priceInput.value = currentPrices[ticker].toFixed(2);
-                marketPrice.textContent = `$${currentPrices[ticker].toFixed(2)}`;
+            // Check exact first, then suffixed
+            let foundPrice = currentPrices[ticker] || currentPrices[lookupTicker];
+
+            if (foundPrice) {
+                priceInput.value = foundPrice.toFixed(2);
+                marketPrice.textContent = `$${foundPrice.toFixed(2)}`;
                 priceInfo.style.display = 'block';
             } else {
                 priceInfo.style.display = 'none';
             }
         });
 
+        // Also listen to exchange change to update price
+        document.getElementById('exchange-select').addEventListener('change', function (e) {
+            // Trigger stock select change event logic
+            document.getElementById('stock-select').dispatchEvent(new Event('change'));
+        });
+
         async function executeTrade(action) {
-            const ticker = document.getElementById('stock-select').value;
+            let ticker = document.getElementById('stock-select').value.toUpperCase().trim();
+            const exchange = document.getElementById('exchange-select').value;
             const quantity = parseInt(document.getElementById('quantity-input').value);
             const price = parseFloat(document.getElementById('price-input').value);
             const note = document.getElementById('note-input').value;
@@ -395,6 +427,14 @@
             if (!ticker || !quantity || !price) {
                 showError('Please fill in all required fields');
                 return;
+            }
+
+            // Append suffix if not US
+            // Also logic to prevent double suffixing if user typed valid suffix
+            if (exchange !== 'US') {
+                if (!ticker.includes('.')) {
+                    ticker = `${ticker}.${exchange}`;
+                }
             }
 
             showLoading(true);
@@ -437,11 +477,12 @@
         }
 
         // Close modal when clicking outside
-        document.getElementById('trade-modal').addEventListener('click', function(e) {
+        document.getElementById('trade-modal').addEventListener('click', function (e) {
             if (e.target === this) {
                 closeTradeModal();
             }
         });
     </script>
 </body>
+
 </html>

@@ -123,7 +123,7 @@ def execute_trade():
         note = data.get('note', '')
 
         # Validate ticker (basic check)
-        if not ticker or len(ticker) > 5:
+        if not ticker or len(ticker) > 12:
             return jsonify({'error': f'Invalid ticker format: {ticker}'}), 400
 
         # Validate action
