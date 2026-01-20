@@ -4,7 +4,7 @@
  * Sophisticated design with deep navy backgrounds, gold accents, and elegant typography
  */
 
-/* CSS Custom Properties */
+/* CSS Custom Properties - Dark Mode (Default) */
 :root {
     /* Background Colors */
     --bg-deep: #080c14;
@@ -52,6 +52,29 @@
     --radius-lg: 16px;
     --radius-xl: 20px;
     --radius-2xl: 24px;
+}
+
+/* Light Mode Theme */
+[data-theme="light"] {
+    --bg-deep: #f1f5f9;
+    --bg-primary: #ffffff;
+    --bg-surface: #ffffff;
+    --bg-elevated: #f8fafc;
+    --bg-hover: #e2e8f0;
+
+    --border-subtle: #e2e8f0;
+    --border-accent: #1e3a5f;
+    --border-highlight: rgba(30, 58, 95, 0.3);
+
+    --text-primary: #0f172a;
+    --text-secondary: #475569;
+    --text-muted: #64748b;
+    --text-link: #1e3a5f;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    --shadow-xl: 0 25px 50px -12px rgba(0, 0, 0, 0.15);
 }
 
 /* Reset and base styles */
@@ -928,4 +951,185 @@ button:focus-visible {
     .trade-buttons {
         flex-direction: column;
     }
+}
+
+/* ===== LIGHT MODE SPECIFIC OVERRIDES ===== */
+
+/* Theme Toggle Button */
+.theme-toggle {
+    background: transparent;
+    border: 1px solid var(--border-accent);
+    color: var(--text-secondary);
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    transition: all var(--transition-fast);
+}
+
+.theme-toggle:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    border-color: var(--accent-gold);
+}
+
+/* Light mode header */
+[data-theme="light"] .header {
+    background: linear-gradient(135deg, #1e3a5f 0%, #2d4a6f 50%, #1e3a5f 100%);
+    border-color: rgba(30, 58, 95, 0.3);
+}
+
+[data-theme="light"] .header h1 {
+    background: linear-gradient(135deg, #ffffff 0%, #d4af37 50%, #ffffff 100%);
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+[data-theme="light"] .header .last-update {
+    color: rgba(255, 255, 255, 0.8);
+}
+
+[data-theme="light"] .header .refresh-btn {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.3);
+    color: white;
+}
+
+[data-theme="light"] .header .refresh-btn:hover {
+    background: rgba(255, 255, 255, 0.25);
+}
+
+[data-theme="light"] .header .theme-toggle {
+    border-color: rgba(255, 255, 255, 0.3);
+    color: rgba(255, 255, 255, 0.8);
+}
+
+[data-theme="light"] .header .theme-toggle:hover {
+    background: rgba(255, 255, 255, 0.15);
+    color: white;
+}
+
+[data-theme="light"] .header #quota-status {
+    color: rgba(255, 255, 255, 0.7) !important;
+}
+
+/* Light mode container */
+[data-theme="light"] .container {
+    border-color: #e2e8f0;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 10px 20px -5px rgba(0, 0, 0, 0.1);
+}
+
+/* Light mode cards */
+[data-theme="light"] .card {
+    background: white;
+    border-color: #e2e8f0;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="light"] .card:hover {
+    border-color: var(--border-accent);
+}
+
+/* Light mode KPI cards */
+[data-theme="light"] .kpi-card {
+    background: white;
+    border-color: #e2e8f0;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .kpi-card:hover {
+    border-color: var(--accent-info);
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
+}
+
+/* Light mode table */
+[data-theme="light"] .holdings-table thead {
+    background: linear-gradient(180deg, #1e3a5f 0%, #152c4a 100%);
+}
+
+[data-theme="light"] .holdings-table th {
+    color: white;
+}
+
+[data-theme="light"] .holdings-table tbody tr:nth-child(even) {
+    background: #f8fafc;
+}
+
+[data-theme="light"] .holdings-table tbody tr:hover {
+    background: rgba(30, 58, 95, 0.05);
+}
+
+/* Light mode trade items */
+[data-theme="light"] .trade-item {
+    background: #f8fafc;
+    border-color: #e2e8f0;
+}
+
+[data-theme="light"] .trade-item.buy {
+    background: rgba(34, 197, 94, 0.08);
+    border-color: rgba(34, 197, 94, 0.2);
+}
+
+[data-theme="light"] .trade-item.sell {
+    background: rgba(239, 68, 68, 0.08);
+    border-color: rgba(239, 68, 68, 0.2);
+}
+
+/* Light mode modal */
+[data-theme="light"] .trade-modal {
+    background: rgba(0, 0, 0, 0.5);
+}
+
+[data-theme="light"] .trade-modal-content {
+    background: white;
+    border-color: #e2e8f0;
+}
+
+[data-theme="light"] .form-group input,
+[data-theme="light"] .form-group select {
+    background: #f8fafc;
+    border-color: #e2e8f0;
+    color: var(--text-primary);
+}
+
+[data-theme="light"] .form-group input:focus,
+[data-theme="light"] .form-group select:focus {
+    border-color: var(--accent-info);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+/* Light mode floating buttons */
+[data-theme="light"] .admin-trade-btn {
+    background: linear-gradient(135deg, #1e3a5f 0%, #152c4a 100%);
+    border-color: rgba(212, 175, 55, 0.4);
+}
+
+/* Light mode portfolio total */
+[data-theme="light"] .portfolio-total {
+    background: #f8fafc;
+    border-color: #e2e8f0;
+}
+
+[data-theme="light"] .total-value {
+    color: #1e3a5f;
+    text-shadow: none;
+}
+
+/* Light mode scrollbar */
+[data-theme="light"] ::-webkit-scrollbar-track {
+    background: #f1f5f9;
+}
+
+[data-theme="light"] ::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+}
+
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
 }

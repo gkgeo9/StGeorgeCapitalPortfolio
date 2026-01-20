@@ -28,10 +28,97 @@ const CONFIG = {
 let isRefreshing = false;
 
 /**
+ * Theme Management
+ */
+function getTheme() {
+    return document.documentElement.getAttribute('data-theme') || 'dark';
+}
+
+function setTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('theme', theme);
+    updateThemeIcon(theme);
+    updateChartsForTheme(theme);
+}
+
+function toggleTheme() {
+    const currentTheme = getTheme();
+    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+    setTheme(newTheme);
+}
+
+function updateThemeIcon(theme) {
+    const icon = document.getElementById('theme-icon');
+    if (icon) {
+        icon.innerHTML = theme === 'dark' ? '&#9790;' : '&#9728;'; // Moon or Sun
+    }
+}
+
+function loadSavedTheme() {
+    const savedTheme = localStorage.getItem('theme') || 'dark';
+    setTheme(savedTheme);
+}
+
+function getChartTheme() {
+    const theme = getTheme();
+    if (theme === 'light') {
+        return {
+            paper_bgcolor: 'rgba(0,0,0,0)',
+            plot_bgcolor: 'rgba(248, 250, 252, 0.5)',
+            gridcolor: 'rgba(226, 232, 240, 0.8)',
+            textcolor: '#475569',
+            axiscolor: '#64748b',
+            font: { family: 'Inter, -apple-system, sans-serif', color: '#475569' }
+        };
+    }
+    return CONFIG.THEME;
+}
+
+function updateChartsForTheme(theme) {
+    // Re-render charts with new theme if they exist
+    const pieChart = document.getElementById('pie-chart');
+    const timelineChart = document.getElementById('timeline-chart');
+    const stockChart = document.getElementById('stock-prices-chart');
+
+    if (pieChart && pieChart.data) {
+        Plotly.relayout('pie-chart', {
+            paper_bgcolor: getChartTheme().paper_bgcolor,
+            plot_bgcolor: getChartTheme().plot_bgcolor
+        });
+    }
+
+    if (timelineChart && timelineChart.data) {
+        Plotly.relayout('timeline-chart', {
+            paper_bgcolor: getChartTheme().paper_bgcolor,
+            plot_bgcolor: getChartTheme().plot_bgcolor,
+            'xaxis.gridcolor': getChartTheme().gridcolor,
+            'yaxis.gridcolor': getChartTheme().gridcolor,
+            'xaxis.tickfont.color': getChartTheme().axiscolor,
+            'yaxis.tickfont.color': getChartTheme().axiscolor
+        });
+    }
+
+    if (stockChart && stockChart.data) {
+        Plotly.relayout('stock-prices-chart', {
+            paper_bgcolor: getChartTheme().paper_bgcolor,
+            plot_bgcolor: getChartTheme().plot_bgcolor,
+            'xaxis.gridcolor': getChartTheme().gridcolor,
+            'yaxis.gridcolor': getChartTheme().gridcolor,
+            'xaxis.tickfont.color': getChartTheme().axiscolor,
+            'yaxis.tickfont.color': getChartTheme().axiscolor,
+            'legend.font.color': getChartTheme().textcolor
+        });
+    }
+}
+
+/**
  * Initialize dashboard on page load
  */
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Dashboard initializing...');
+
+    // Load saved theme preference
+    loadSavedTheme();
 
     loadAllData();
 
@@ -346,11 +433,11 @@ function renderPieChart(holdings, cash) {
             font: {
                 family: 'Inter, sans-serif',
                 size: 12,
-                color: '#94a3b8'
+                color: getChartTheme().textcolor
             }
         },
-        paper_bgcolor: CONFIG.THEME.paper_bgcolor,
-        plot_bgcolor: CONFIG.THEME.plot_bgcolor,
+        paper_bgcolor: getChartTheme().paper_bgcolor,
+        plot_bgcolor: getChartTheme().plot_bgcolor,
         margin: { t: 20, b: 20, l: 20, r: 120 }
     };
 
@@ -477,28 +564,28 @@ function renderTimelineChart(dates, values) {
                 text: 'Date',
                 font: { color: '#64748b', size: 12, family: 'Inter, sans-serif' }
             },
-            gridcolor: CONFIG.THEME.gridcolor,
+            gridcolor: getChartTheme().gridcolor,
             linecolor: 'rgba(30, 58, 95, 0.4)',
-            tickfont: { color: '#64748b', size: 11, family: 'Inter, sans-serif' }
+            tickfont: { color: getChartTheme().axiscolor, size: 11, family: 'Inter, sans-serif' }
         },
         yaxis: {
             title: {
                 text: 'Portfolio Value ($)',
-                font: { color: '#64748b', size: 12, family: 'Inter, sans-serif' }
+                font: { color: getChartTheme().axiscolor, size: 12, family: 'Inter, sans-serif' }
             },
-            gridcolor: CONFIG.THEME.gridcolor,
+            gridcolor: getChartTheme().gridcolor,
             linecolor: 'rgba(30, 58, 95, 0.4)',
             tickformat: '$,.0f',
-            tickfont: { color: '#64748b', size: 11, family: 'JetBrains Mono, monospace' }
+            tickfont: { color: getChartTheme().axiscolor, size: 11, family: 'JetBrains Mono, monospace' }
         },
         hovermode: 'x unified',
         hoverlabel: {
-            bgcolor: '#111827',
+            bgcolor: getTheme() === 'dark' ? '#111827' : '#ffffff',
             bordercolor: '#1e3a5f',
-            font: { family: 'JetBrains Mono, monospace', color: '#f8fafc' }
+            font: { family: 'JetBrains Mono, monospace', color: getTheme() === 'dark' ? '#f8fafc' : '#0f172a' }
         },
-        paper_bgcolor: CONFIG.THEME.paper_bgcolor,
-        plot_bgcolor: CONFIG.THEME.plot_bgcolor,
+        paper_bgcolor: getChartTheme().paper_bgcolor,
+        plot_bgcolor: getChartTheme().plot_bgcolor,
         margin: { t: 20, b: 60, l: 70, r: 20 },
         shapes: [{
             type: 'line',
@@ -570,25 +657,25 @@ function renderStockPricesChart(stocksData) {
                 text: 'Date',
                 font: { color: '#64748b', size: 12, family: 'Inter, sans-serif' }
             },
-            gridcolor: CONFIG.THEME.gridcolor,
+            gridcolor: getChartTheme().gridcolor,
             linecolor: 'rgba(30, 58, 95, 0.4)',
-            tickfont: { color: '#64748b', size: 11, family: 'Inter, sans-serif' }
+            tickfont: { color: getChartTheme().axiscolor, size: 11, family: 'Inter, sans-serif' }
         },
         yaxis: {
             title: {
                 text: 'Stock Price ($)',
-                font: { color: '#64748b', size: 12, family: 'Inter, sans-serif' }
+                font: { color: getChartTheme().axiscolor, size: 12, family: 'Inter, sans-serif' }
             },
-            gridcolor: CONFIG.THEME.gridcolor,
+            gridcolor: getChartTheme().gridcolor,
             linecolor: 'rgba(30, 58, 95, 0.4)',
             tickformat: '$,.2f',
-            tickfont: { color: '#64748b', size: 11, family: 'JetBrains Mono, monospace' }
+            tickfont: { color: getChartTheme().axiscolor, size: 11, family: 'JetBrains Mono, monospace' }
         },
         hovermode: 'x unified',
         hoverlabel: {
-            bgcolor: '#111827',
+            bgcolor: getTheme() === 'dark' ? '#111827' : '#ffffff',
             bordercolor: '#1e3a5f',
-            font: { family: 'JetBrains Mono, monospace', color: '#f8fafc' }
+            font: { family: 'JetBrains Mono, monospace', color: getTheme() === 'dark' ? '#f8fafc' : '#0f172a' }
         },
         legend: {
             orientation: 'h',
@@ -599,11 +686,11 @@ function renderStockPricesChart(stocksData) {
             font: {
                 family: 'Inter, sans-serif',
                 size: 12,
-                color: '#94a3b8'
+                color: getChartTheme().textcolor
             }
         },
-        paper_bgcolor: CONFIG.THEME.paper_bgcolor,
-        plot_bgcolor: CONFIG.THEME.plot_bgcolor,
+        paper_bgcolor: getChartTheme().paper_bgcolor,
+        plot_bgcolor: getChartTheme().plot_bgcolor,
         margin: { t: 40, b: 60, l: 70, r: 20 }
     };
 
