@@ -1,44 +1,35 @@
 # portfolio_manager.py
 """
-Core portfolio management logic with provider abstraction.
-Now uses pluggable price providers (yfinance OR Alpha Vantage).
+Core portfolio management logic using Alpha Vantage API.
 """
 
-import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
-import time
 from sqlalchemy import func, desc
 from models import db, Price, Trade, Snapshot, PortfolioConfig
-from providers import PriceDataService
+from providers import create_provider
 
 
 class PortfolioManager:
-    """Manages portfolio operations with pluggable price providers"""
+    """Manages portfolio operations using Alpha Vantage price data."""
 
     def __init__(self, app=None):
         self.app = app
         self._last_backfill_ts = None
-        self._cooldown_seconds = 60  # Default, will be overridden by config
-        self.provider = None  # Will be initialized in init_app
+        self._cooldown_seconds = 60
+        self.provider = None
         if app:
             self.init_app(app)
 
     def init_app(self, app):
         """Initialize with Flask app context"""
         self.app = app
-        self.stocks = [] # Deprecated, use get_tracked_stocks()
         self.default_stocks = app.config.get('DEFAULT_PORTFOLIO_STOCKS', [])
         self.initial_cash = app.config['INITIAL_CASH']
-        self.shares_per_trade = app.config['SHARES_PER_TRADE']
-        self.max_retries = app.config['YFINANCE_MAX_RETRIES']
-        self.retry_delay = app.config['YFINANCE_RETRY_DELAY']
         self._cooldown_seconds = app.config.get('MANUAL_REFRESH_COOLDOWN', 60)
 
-        # Initialize price provider (auto-selects based on config/env)
-        self.provider = PriceDataService.create_provider(app.config)
-        print(f"  Portfolio Manager using: {self.provider.get_provider_name()}")
+        self.provider = create_provider(app.config)
 
     # ========================================
     # VALIDATION METHODS (delegated to provider)
@@ -131,16 +122,14 @@ class PortfolioManager:
 
     def get_current_prices(self, use_cache=True) -> Dict[str, float]:
         """
-        Get current prices using configured provider.
+        Get current prices using Alpha Vantage.
         Falls back to database cache if provider fails.
         """
+        stocks = self.get_tracked_stocks()
         try:
-            # Use provider to get prices
-            prices = self.provider.get_current_prices(self.stocks)
+            prices = self.provider.get_current_prices(stocks)
 
-            # Check for None values (failed fetches)
             failed = [ticker for ticker, price in prices.items() if price is None]
-
             if failed and use_cache:
                 print(f"  Some tickers failed: {failed}, using database cache...")
                 prices = self._get_prices_from_db(prices)

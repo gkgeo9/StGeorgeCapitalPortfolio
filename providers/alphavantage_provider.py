@@ -1,7 +1,7 @@
 # providers/alphavantage_provider.py
 """
-Alpha Vantage implementation of price data provider.
-Official API with reliable rate limits - perfect for production/Railway.
+Alpha Vantage price data provider.
+Official API with reliable rate limits.
 """
 
 import requests
@@ -9,7 +9,6 @@ import pandas as pd
 import time
 from datetime import datetime, date, timezone, timedelta
 from typing import Dict, List, Optional
-from .base_provider import BasePriceProvider
 
 
 class AlphaVantageError(Exception):
@@ -29,28 +28,20 @@ class AlphaVantageInvalidKeyError(AlphaVantageError):
     pass
 
 
-class AlphaVantageProvider(BasePriceProvider):
+class AlphaVantageProvider:
     """
     Alpha Vantage API price provider.
 
-    Pros:
-    - Official API (reliable, supported)
-    - Works on shared IPs (uses API key, not IP tracking)
-    - High rate limits on paid tier (75 req/min)
-    - No random breaking like yfinance
-
-    Cons:
-    - Requires API key
-    - Free tier very limited (25/day premium, 500/day standard, 5/min)
-    - Costs $49.99/month for paid tier
-
     Rate Limits:
-    - Free: 5 calls/min, 500 calls/day (standard endpoints)
+    - Free: 5 calls/min, 500 calls/day
     - Paid ($49.99/mo): 75 calls/min, unlimited daily
     """
 
     def __init__(self, config: Dict):
-        super().__init__(config)
+        self.config = config
+        self.max_retries = config.get('max_retries', 3)
+        self.retry_delay = config.get('retry_delay', 5)
+
         self.api_key = config.get('api_key')
         if not self.api_key:
             raise ValueError("Alpha Vantage API key is required")
@@ -353,3 +344,73 @@ class AlphaVantageProvider(BasePriceProvider):
         except Exception as e:
             print(f"  ✗ Error fetching {ticker}: {e}")
             raise
+
+    # ========================================
+    # VALIDATION METHODS
+    # ========================================
+
+    def _validate_tickers(self, tickers: List[str]) -> List[str]:
+        """Validate and clean ticker list"""
+        if not isinstance(tickers, list) or not tickers:
+            raise ValueError("tickers must be a non-empty list")
+        clean = []
+        for t in tickers:
+            if not isinstance(t, str) or not t.strip():
+                raise ValueError(f"Invalid ticker: {t!r}")
+            clean.append(t.strip().upper())
+        return list(dict.fromkeys(clean))
+
+    def _assert_price(self, price: float, ticker: str, context: str) -> None:
+        """Validate stock price"""
+        if pd.isna(price):
+            raise ValueError(f"[{ticker}] price is NaN in {context}")
+        try:
+            p = float(price)
+        except Exception:
+            raise ValueError(f"[{ticker}] invalid price in {context}")
+        if p <= 0:
+            raise ValueError(f"[{ticker}] price must be > 0 in {context}")
+
+    def _assert_volume(self, volume: int, ticker: str, context: str) -> None:
+        """Validate trading volume"""
+        if pd.isna(volume):
+            raise ValueError(f"[{ticker}] volume is NaN in {context}")
+        try:
+            v = int(volume)
+        except Exception:
+            raise ValueError(f"[{ticker}] invalid volume in {context}")
+        if v < 0:
+            raise ValueError(f"[{ticker}] volume cannot be negative in {context}")
+
+    def _assert_date(self, dt: datetime, ticker: str, context: str) -> None:
+        """Validate date/timestamp"""
+        if not isinstance(dt, (datetime, date)):
+            raise ValueError(f"[{ticker}] invalid date type in {context}")
+        now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
+        if dt > now:
+            raise ValueError(f"[{ticker}] date cannot be in future in {context}")
+
+    def validate_price_data(self, df: pd.DataFrame, ticker: str) -> pd.DataFrame:
+        """Validate DataFrame of historical prices"""
+        required_cols = ['timestamp', 'close']
+        for col in required_cols:
+            if col not in df.columns:
+                raise ValueError(f"Missing required column: {col}")
+
+        for idx, row in df.iterrows():
+            self._assert_date(row['timestamp'], ticker, f"row {idx}")
+            self._assert_price(row['close'], ticker, f"row {idx} close")
+
+            if 'open' in df.columns and not pd.isna(row['open']):
+                self._assert_price(row['open'], ticker, f"row {idx} open")
+            if 'high' in df.columns and not pd.isna(row['high']):
+                self._assert_price(row['high'], ticker, f"row {idx} high")
+            if 'low' in df.columns and not pd.isna(row['low']):
+                self._assert_price(row['low'], ticker, f"row {idx} low")
+            if 'volume' in df.columns and not pd.isna(row['volume']):
+                self._assert_volume(row['volume'], ticker, f"row {idx}")
+
+        return df
+
+    def __repr__(self):
+        return f"<AlphaVantageProvider({self.get_provider_name()})>"
