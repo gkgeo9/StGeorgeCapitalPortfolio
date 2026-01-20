@@ -117,31 +117,37 @@ class PortfolioManager:
                 print(f"✓ Initialized portfolio with ${self.initial_cash:,.2f}")
 
     # ========================================
-    # PRICE FETCHING (now uses provider)
+    # PRICE FETCHING
     # ========================================
 
-    def get_current_prices(self, use_cache=True) -> Dict[str, float]:
+    def get_prices_from_db(self) -> Dict[str, float]:
         """
-        Get current prices using Alpha Vantage.
-        Falls back to database cache if provider fails.
+        Get latest prices from DATABASE ONLY - NO API CALLS.
+        Used for displaying portfolio data without hitting rate limits.
+        """
+        return self._get_prices_from_db()
+
+    def fetch_live_prices(self) -> Dict[str, float]:
+        """
+        Fetch LIVE prices from Alpha Vantage API.
+        ONLY called during manual refresh - NEVER automatically.
         """
         stocks = self.get_tracked_stocks()
+        print(f"  Fetching live prices for {len(stocks)} stocks...")
         try:
             prices = self.provider.get_current_prices(stocks)
 
             failed = [ticker for ticker, price in prices.items() if price is None]
-            if failed and use_cache:
-                print(f"  Some tickers failed: {failed}, using database cache...")
+            if failed:
+                print(f"  Some tickers failed: {failed}, filling from database...")
                 prices = self._get_prices_from_db(prices)
 
             return prices
 
         except Exception as e:
             print(f"  Provider error: {e}")
-            if use_cache:
-                print(f"  Falling back to database cache...")
-                return self._get_prices_from_db()
-            raise
+            print(f"  Falling back to database cache...")
+            return self._get_prices_from_db()
 
     def _get_prices_from_db(self, partial_prices: Dict[str, float] = None) -> Dict[str, float]:
         """Get latest prices from database as fallback"""
@@ -177,7 +183,7 @@ class PortfolioManager:
     # BACKFILL (now uses provider)
     # ========================================
 
-    def manual_backfill(self, default_lookback_days: int = 7) -> Tuple[bool, str]:
+    def manual_backfill(self, default_lookback_days: int = 365) -> Tuple[bool, str]:
         """
         Manual backfill triggered by user button.
         Has cooldown to avoid rate limits.
@@ -378,10 +384,11 @@ class PortfolioManager:
     # ========================================
 
     def take_snapshot(self, note: str = "manual snapshot"):
-        """Take a snapshot of current portfolio state"""
+        """Take a snapshot of current portfolio state using DATABASE prices only (no API calls)."""
         print(f"\n📸 Taking portfolio snapshot...")
 
-        prices = self.get_current_prices()
+        # Use database prices ONLY - no API calls
+        prices = self.get_prices_from_db()
         positions = self.get_current_positions()
         cash_balance = self.get_cash_balance()
 
@@ -449,8 +456,9 @@ class PortfolioManager:
         return cash
 
     def calculate_portfolio_stats(self) -> Dict:
-        """Calculate comprehensive portfolio statistics"""
-        prices = self.get_current_prices()
+        """Calculate portfolio statistics using DATABASE prices only (no API calls)."""
+        # Use database prices ONLY - no API calls
+        prices = self.get_prices_from_db()
         positions = self.get_current_positions()
         cash = self.get_cash_balance()
         initial_value = float(PortfolioConfig.get_value('initial_cash', self.initial_cash))

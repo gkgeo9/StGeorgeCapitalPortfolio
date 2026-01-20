@@ -201,7 +201,10 @@
         <header class="header">
             <h1>St. George Capital Portfolio</h1>
             <p class="last-update">Last updated: <span id="last-update-time">Loading...</span></p>
-            <button onclick="refreshData()" class="refresh-btn" id="refresh-btn">Refresh Data</button>
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <button onclick="refreshData()" class="refresh-btn" id="refresh-btn">Refresh Data</button>
+                <span id="quota-status" style="font-size: 12px; color: #7f8c8d;"></span>
+            </div>
         </header>
 
         <!-- Loading overlay -->
