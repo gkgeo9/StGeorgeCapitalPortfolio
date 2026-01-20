@@ -294,15 +294,15 @@
 
             <form id="trade-form">
                 <div class="form-group">
-                    <label for="stock-select">Stock</label>
-                    <select id="stock-select" required>
-                        <option value="">Select a stock...</option>
+                    <label for="stock-select">Stock Ticker</label>
+                    <input type="text" id="stock-select" list="stock-suggestions" placeholder="e.g. TSLA" required style="text-transform: uppercase;">
+                    <datalist id="stock-suggestions">
                         <option value="NVDA">NVDA - NVIDIA</option>
                         <option value="MSFT">MSFT - Microsoft</option>
                         <option value="AAPL">AAPL - Apple</option>
                         <option value="JPM">JPM - JPMorgan Chase</option>
                         <option value="UNH">UNH - UnitedHealth</option>
-                    </select>
+                    </datalist>
                 </div>
 
                 <div class="form-group">

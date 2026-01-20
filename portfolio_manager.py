@@ -1,43 +1,35 @@
 # portfolio_manager.py
 """
-Core portfolio management logic with provider abstraction.
-Now uses pluggable price providers (yfinance OR Alpha Vantage).
+Core portfolio management logic using Alpha Vantage API.
 """
 
-import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
-import time
 from sqlalchemy import func, desc
 from models import db, Price, Trade, Snapshot, PortfolioConfig
-from providers import PriceDataService
+from providers import create_provider
 
 
 class PortfolioManager:
-    """Manages portfolio operations with pluggable price providers"""
+    """Manages portfolio operations using Alpha Vantage price data."""
 
     def __init__(self, app=None):
         self.app = app
         self._last_backfill_ts = None
-        self._cooldown_seconds = 60  # Default, will be overridden by config
-        self.provider = None  # Will be initialized in init_app
+        self._cooldown_seconds = 60
+        self.provider = None
         if app:
             self.init_app(app)
 
     def init_app(self, app):
         """Initialize with Flask app context"""
         self.app = app
-        self.stocks = app.config['PORTFOLIO_STOCKS']
+        self.default_stocks = app.config.get('DEFAULT_PORTFOLIO_STOCKS', [])
         self.initial_cash = app.config['INITIAL_CASH']
-        self.shares_per_trade = app.config['SHARES_PER_TRADE']
-        self.max_retries = app.config['YFINANCE_MAX_RETRIES']
-        self.retry_delay = app.config['YFINANCE_RETRY_DELAY']
         self._cooldown_seconds = app.config.get('MANUAL_REFRESH_COOLDOWN', 60)
 
-        # Initialize price provider (auto-selects based on config/env)
-        self.provider = PriceDataService.create_provider(app.config)
-        print(f"  Portfolio Manager using: {self.provider.get_provider_name()}")
+        self.provider = create_provider(app.config)
 
     # ========================================
     # VALIDATION METHODS (delegated to provider)
@@ -87,6 +79,32 @@ class PortfolioManager:
         return "'" + s if s[:1] in ("=", "+", "-", "@") else s
 
     # ========================================
+    # DYNAMIC STOCK MANAGEMENT
+    # ========================================
+
+    def get_tracked_stocks(self) -> List[str]:
+        """
+        Get list of all stocks currently tracked in the portfolio.
+        Combines default stocks (if DB empty) with any stocks present in positions or history.
+        """
+        # Get stocks from trades (positions)
+        trade_tickers = db.session.query(Trade.ticker).distinct().all()
+        trade_tickers = [t[0] for t in trade_tickers]
+
+        # Get stocks from price history
+        price_tickers = db.session.query(Price.ticker).distinct().all()
+        price_tickers = [t[0] for t in price_tickers]
+
+        # Combine unique tickers
+        all_tickers = set(trade_tickers + price_tickers)
+
+        # If database is empty, return defaults
+        if not all_tickers:
+            return self.default_stocks
+
+        return sorted(list(all_tickers))
+
+    # ========================================
     # INITIALIZATION
     # ========================================
 
@@ -104,16 +122,14 @@ class PortfolioManager:
 
     def get_current_prices(self, use_cache=True) -> Dict[str, float]:
         """
-        Get current prices using configured provider.
+        Get current prices using Alpha Vantage.
         Falls back to database cache if provider fails.
         """
+        stocks = self.get_tracked_stocks()
         try:
-            # Use provider to get prices
-            prices = self.provider.get_current_prices(self.stocks)
+            prices = self.provider.get_current_prices(stocks)
 
-            # Check for None values (failed fetches)
             failed = [ticker for ticker, price in prices.items() if price is None]
-
             if failed and use_cache:
                 print(f"  Some tickers failed: {failed}, using database cache...")
                 prices = self._get_prices_from_db(prices)
@@ -130,8 +146,9 @@ class PortfolioManager:
     def _get_prices_from_db(self, partial_prices: Dict[str, float] = None) -> Dict[str, float]:
         """Get latest prices from database as fallback"""
         prices = partial_prices if partial_prices else {}
+        stocks = self.get_tracked_stocks()
 
-        for stock in self.stocks:
+        for stock in stocks:
             if prices.get(stock) is None:
                 latest_price = Price.query.filter_by(ticker=stock) \
                     .order_by(desc(Price.timestamp)) \
@@ -190,7 +207,7 @@ class PortfolioManager:
                 return False, "✓ Already up to date"
             message_prefix = "Incremental backfill"
 
-        end_date = today + timedelta(days=1)
+        end_date = today
 
         # Run backfill
         result = self.backfill_prices(
@@ -230,7 +247,8 @@ class PortfolioManager:
             'error': None
         }
 
-        for stock in self.stocks:
+        stocks = self.get_tracked_stocks()
+        for stock in stocks:
             try:
                 print(f"[{stock}] Fetching historical data...")
 
@@ -369,10 +387,11 @@ class PortfolioManager:
 
         timestamp = datetime.now(timezone.utc)
 
-        stock_value = sum(positions[stock] * prices[stock] for stock in self.stocks)
+        stocks = self.get_tracked_stocks()
+        stock_value = sum(positions.get(stock, 0) * prices.get(stock, 0) for stock in stocks)
         portfolio_value = stock_value + cash_balance
 
-        for stock in self.stocks:
+        for stock in stocks:
             event_id = Snapshot.generate_event_id(timestamp, stock, positions[stock])
 
             existing = Snapshot.query.filter_by(event_id=event_id).first()
@@ -401,7 +420,8 @@ class PortfolioManager:
 
     def get_current_positions(self) -> Dict[str, int]:
         """Get current stock positions by calculating from all trades"""
-        positions = {stock: 0 for stock in self.stocks}
+        stocks = self.get_tracked_stocks()
+        positions = {stock: 0 for stock in stocks}
 
         trades = Trade.query.order_by(Trade.timestamp).all()
 
@@ -438,7 +458,8 @@ class PortfolioManager:
         stock_values = {}
         total_stock_value = 0
 
-        for stock in self.stocks:
+        stocks = self.get_tracked_stocks()
+        for stock in stocks:
             shares = positions[stock]
             price = prices.get(stock)
 
@@ -562,7 +583,8 @@ class PortfolioManager:
         best_return = -float('inf')
         worst_return = float('inf')
 
-        for stock in self.stocks:
+        stocks = self.get_tracked_stocks()
+        for stock in stocks:
             first_price = Price.query.filter_by(ticker=stock) \
                 .order_by(Price.timestamp) \
                 .first()
