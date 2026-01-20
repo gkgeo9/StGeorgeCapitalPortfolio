@@ -373,6 +373,16 @@
         };
 
         function openTradeModal() {
+            // Check if already authenticated in this session
+            if (sessionStorage.getItem('tradeAuth') !== 'true') {
+                var password = prompt("Enter trading password:");
+                if (password === "stgeorge") {
+                    sessionStorage.setItem('tradeAuth', 'true');
+                } else {
+                    alert("Incorrect password");
+                    return;
+                }
+            }
             document.getElementById('trade-modal').style.display = 'flex';
         }
 
