@@ -85,7 +85,8 @@ async function loadAllData() {
             loadTimeline(),
             loadStockPrices(),
             loadTrades(),
-            loadPerformance()
+            loadPerformance(),
+            loadQuotaStatus()
         ]);
 
         updateLastUpdateTime();
@@ -95,6 +96,35 @@ async function loadAllData() {
         console.error('Error loading dashboard data:', error);
         showError('Failed to load dashboard data. Please refresh the page.');
         showLoading(false);
+    }
+}
+
+/**
+ * Load API quota status (no API call to Alpha Vantage - just internal status)
+ */
+async function loadQuotaStatus() {
+    try {
+        const response = await fetch('/api/provider-status');
+        const data = await response.json();
+
+        const quotaEl = document.getElementById('quota-status');
+        if (quotaEl && data.quota) {
+            const remaining = data.quota.daily_remaining;
+            const limit = data.quota.daily_limit;
+            if (remaining === 'unlimited') {
+                quotaEl.textContent = 'API: Paid tier (unlimited)';
+                quotaEl.style.color = '#27ae60';
+            } else {
+                const pct = (remaining / limit) * 100;
+                quotaEl.textContent = `API: ${remaining}/${limit} calls remaining`;
+                quotaEl.style.color = pct < 20 ? '#e74c3c' : pct < 50 ? '#f39c12' : '#7f8c8d';
+            }
+        } else if (quotaEl) {
+            quotaEl.textContent = '';
+        }
+    } catch (error) {
+        console.error('Error loading quota status:', error);
+        // Don't throw - quota display is optional
     }
 }
 

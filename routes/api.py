@@ -8,7 +8,7 @@ Now includes manual refresh/backfill endpoints.
 from flask import Blueprint, jsonify, request, current_app
 from sqlalchemy import desc
 from models import db, Price, Trade, Snapshot
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 api_bp = Blueprint('api', __name__)
 
@@ -38,7 +38,7 @@ def get_portfolio():
             'total_pnl': round(stats['total_pnl'], 2),
             'pnl_percent': round(stats['pnl_percent'], 2),
             'holdings': holdings,
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': datetime.now(timezone.utc).isoformat()
         })
 
     except Exception as e:
@@ -48,14 +48,15 @@ def get_portfolio():
 @api_bp.route('/refresh', methods=['POST'])
 def manual_refresh():
     """
-    Manual refresh endpoint - backfills latest price data and takes snapshot.
-    This replaces automatic background updates.
+    Manual refresh endpoint - THE ONLY PLACE that calls Alpha Vantage API.
+    Backfills price data and takes snapshot.
     """
     try:
         pm = current_app.portfolio_manager
 
         # Run manual backfill (with cooldown protection)
-        success, message = pm.manual_backfill(default_lookback_days=7)
+        # Default is 365 days for initial backfill, incremental thereafter
+        success, message = pm.manual_backfill(default_lookback_days=365)
 
         if not success and "Cooldown" in message:
             return jsonify({
@@ -63,14 +64,14 @@ def manual_refresh():
                 'message': message
             }), 429  # Too Many Requests
 
-        # Take a snapshot after backfill
+        # Take a snapshot after backfill (uses DB prices, no API call)
         snapshot_result = pm.take_snapshot(note="manual refresh")
 
         return jsonify({
             'success': True,
             'message': message,
             'portfolio_value': round(snapshot_result['portfolio_value'], 2),
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': datetime.now(timezone.utc).isoformat()
         })
 
     except Exception as e:
@@ -93,7 +94,7 @@ def take_snapshot():
             'success': True,
             'message': 'Snapshot saved successfully',
             'portfolio_value': round(result['portfolio_value'], 2),
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': datetime.now(timezone.utc).isoformat()
         })
 
     except Exception as e:
@@ -120,9 +121,22 @@ def execute_trade():
         quantity = int(data['quantity'])
         price = float(data['price'])
         note = data.get('note', '')
+        
+        # Parse date if provided
+        trade_date = None
+        if 'date' in data and data['date']:
+            try:
+                # Parse YYYY-MM-DD
+                dt = datetime.strptime(data['date'], '%Y-%m-%d')
+                # Add current time or noon to make it roughly accurate or just set to noon UTC
+                # Better: Use current time if today, otherwise noon?
+                # User asked for date selection. Noon is safe.
+                trade_date = dt.replace(hour=12, minute=0, second=0, tzinfo=timezone.utc)
+            except ValueError:
+                 return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
 
         # Validate ticker (basic check)
-        if not ticker or len(ticker) > 5:
+        if not ticker or len(ticker) > 12:
             return jsonify({'error': f'Invalid ticker format: {ticker}'}), 400
 
         # Validate action
@@ -165,11 +179,12 @@ def execute_trade():
             action=action,
             quantity=quantity,
             price=price,
-            note=note
+            note=note,
+            timestamp=trade_date
         )
 
-        # Take a snapshot after the trade
-        pm.take_snapshot(note=f"After {action} trade")
+        # NO automatic snapshot - no API calls on trade
+        # User must click Refresh button to update prices
 
         return jsonify({
             'success': True,
@@ -246,7 +261,7 @@ def get_stock_prices(ticker):
     """Get price history for a specific stock"""
     try:
         days = request.args.get('days', 90, type=int)
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
         prices = Price.query.filter(
             Price.ticker == ticker.upper(),
@@ -268,7 +283,7 @@ def get_all_stocks():
     """Get price history for all tracked stocks"""
     try:
         days = request.args.get('days', 90, type=int)
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
         stocks_data = {}
 
