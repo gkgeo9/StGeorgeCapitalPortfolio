@@ -75,6 +75,9 @@ function getChartTheme() {
 }
 
 function updateChartsForTheme(theme) {
+    // Re-render KPI cards with new theme colors
+    loadPerformance().catch(() => {}); // Re-render KPIs silently
+
     // Re-render charts with new theme if they exist
     const pieChart = document.getElementById('pie-chart');
     const timelineChart = document.getElementById('timeline-chart');
@@ -346,6 +349,8 @@ function renderKPICards(data) {
     const container = document.getElementById('kpi-container');
     const isPositive = data.total_return >= 0;
     const pnlColor = isPositive ? '#22c55e' : '#ef4444';
+    // Use theme-aware default color for neutral KPIs
+    const defaultColor = getTheme() === 'dark' ? '#f8fafc' : '#1e3a5f';
 
     const cards = [
         {
@@ -357,13 +362,13 @@ function renderKPICards(data) {
         {
             value: `${data.win_rate.toFixed(1)}%`,
             label: 'Win Rate',
-            color: '#f8fafc',
+            color: defaultColor,
             className: ''
         },
         {
             value: `${data.volatility.toFixed(1)}%`,
             label: 'Volatility',
-            color: '#f8fafc',
+            color: defaultColor,
             className: ''
         },
         {
@@ -375,7 +380,7 @@ function renderKPICards(data) {
         {
             value: data.total_trades.toString(),
             label: 'Total Trades',
-            color: '#f8fafc',
+            color: defaultColor,
             className: ''
         }
     ];

@@ -482,6 +482,9 @@ body {
     border-collapse: separate;
     border-spacing: 0;
     margin-top: 12px;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    border: 1px solid rgba(30, 58, 95, 0.3);
 }
 
 .holdings-table thead {
@@ -501,12 +504,10 @@ body {
 }
 
 .holdings-table th:first-child {
-    border-radius: var(--radius-md) 0 0 0;
     text-align: left;
 }
 
 .holdings-table th:last-child {
-    border-radius: 0 var(--radius-md) 0 0;
 }
 
 .holdings-table td {
@@ -1106,8 +1107,38 @@ button:focus-visible {
 
 /* Light mode floating buttons */
 [data-theme="light"] .admin-trade-btn {
-    background: linear-gradient(135deg, #1e3a5f 0%, #152c4a 100%);
-    border-color: rgba(212, 175, 55, 0.4);
+    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+    border-color: rgba(59, 130, 246, 0.4);
+    color: white;
+}
+
+[data-theme="light"] .admin-trade-btn:hover {
+    box-shadow:
+        0 12px 32px rgba(0, 0, 0, 0.3),
+        0 0 40px rgba(59, 130, 246, 0.3);
+    border-color: rgba(59, 130, 246, 0.6);
+}
+
+[data-theme="light"] #reset-btn {
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+    border-color: rgba(239, 68, 68, 0.4);
+}
+
+[data-theme="light"] #reset-btn:hover {
+    box-shadow:
+        0 12px 32px rgba(0, 0, 0, 0.3),
+        0 0 40px rgba(239, 68, 68, 0.3);
+    border-color: rgba(239, 68, 68, 0.6);
+}
+
+/* Light mode loading overlay */
+[data-theme="light"] .loading-overlay {
+    background: rgba(255, 255, 255, 0.95);
+    color: #0f172a;
+}
+
+[data-theme="light"] .loading-overlay p {
+    color: #1e3a5f;
 }
 
 /* Light mode portfolio total */
