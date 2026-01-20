@@ -8,7 +8,20 @@
 // Configuration
 const CONFIG = {
     AUTO_REFRESH: false,  // DISABLED automatic refresh
-    CHART_COLORS: ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#34495e']
+    // Premium dark theme chart colors
+    CHART_COLORS: ['#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'],
+    // Dark theme settings for Plotly
+    THEME: {
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(13, 20, 33, 0.3)',
+        gridcolor: 'rgba(30, 58, 95, 0.3)',
+        textcolor: '#94a3b8',
+        axiscolor: '#64748b',
+        font: {
+            family: 'Inter, -apple-system, sans-serif',
+            color: '#94a3b8'
+        }
+    }
 };
 
 // State
@@ -113,11 +126,11 @@ async function loadQuotaStatus() {
             const limit = data.quota.daily_limit;
             if (remaining === 'unlimited') {
                 quotaEl.textContent = 'API: Paid tier (unlimited)';
-                quotaEl.style.color = '#27ae60';
+                quotaEl.style.color = '#22c55e';
             } else {
                 const pct = (remaining / limit) * 100;
                 quotaEl.textContent = `API: ${remaining}/${limit} calls remaining`;
-                quotaEl.style.color = pct < 20 ? '#e74c3c' : pct < 50 ? '#f39c12' : '#7f8c8d';
+                quotaEl.style.color = pct < 20 ? '#ef4444' : pct < 50 ? '#f59e0b' : '#64748b';
             }
         } else if (quotaEl) {
             quotaEl.textContent = '';
@@ -244,38 +257,44 @@ function updatePortfolioStats(data) {
  */
 function renderKPICards(data) {
     const container = document.getElementById('kpi-container');
-    const pnlColor = data.total_return >= 0 ? '#27ae60' : '#e74c3c';
+    const isPositive = data.total_return >= 0;
+    const pnlColor = isPositive ? '#22c55e' : '#ef4444';
 
     const cards = [
         {
-            value: `${data.total_return >= 0 ? '+' : ''}${data.total_return}%`,
+            value: `${isPositive ? '+' : ''}${data.total_return}%`,
             label: 'Total Return',
-            color: pnlColor
+            color: pnlColor,
+            className: isPositive ? 'positive' : 'negative'
         },
         {
             value: `${data.win_rate.toFixed(1)}%`,
             label: 'Win Rate',
-            color: '#1e3a5f'
+            color: '#f8fafc',
+            className: ''
         },
         {
             value: `${data.volatility.toFixed(1)}%`,
             label: 'Volatility',
-            color: '#1e3a5f'
+            color: '#f8fafc',
+            className: ''
         },
         {
             value: `${data.max_drawdown.toFixed(1)}%`,
             label: 'Max Drawdown',
-            color: '#e67e22'
+            color: '#f59e0b',
+            className: ''
         },
         {
             value: data.total_trades.toString(),
             label: 'Total Trades',
-            color: '#1e3a5f'
+            color: '#f8fafc',
+            className: ''
         }
     ];
 
     container.innerHTML = cards.map(card => `
-        <div class="kpi-card">
+        <div class="kpi-card ${card.className}">
             <div class="kpi-value" style="color: ${card.color}">${card.value}</div>
             <div class="kpi-label">${card.label}</div>
         </div>
@@ -299,13 +318,19 @@ function renderPieChart(holdings, cash) {
         labels: labels,
         values: values,
         marker: {
-            colors: CONFIG.CHART_COLORS
+            colors: CONFIG.CHART_COLORS,
+            line: {
+                color: '#0d1421',
+                width: 2
+            }
         },
         textinfo: 'label+percent',
         textfont: {
-            size: 13
+            family: 'JetBrains Mono, monospace',
+            size: 12,
+            color: '#f8fafc'
         },
-        hole: 0.4,
+        hole: 0.45,
         hovertemplate: '<b>%{label}</b><br>$%{value:,.2f}<br>%{percent}<extra></extra>'
     }];
 
@@ -317,11 +342,16 @@ function renderPieChart(holdings, cash) {
             yanchor: 'middle',
             y: 0.5,
             xanchor: 'left',
-            x: 1.05
+            x: 1.05,
+            font: {
+                family: 'Inter, sans-serif',
+                size: 12,
+                color: '#94a3b8'
+            }
         },
-        paper_bgcolor: 'rgba(0,0,0,0)',
-        plot_bgcolor: 'rgba(0,0,0,0)',
-        margin: { t: 20, b: 20, l: 20, r: 100 }
+        paper_bgcolor: CONFIG.THEME.paper_bgcolor,
+        plot_bgcolor: CONFIG.THEME.plot_bgcolor,
+        margin: { t: 20, b: 20, l: 20, r: 120 }
     };
 
     Plotly.newPlot('pie-chart', data, layout, {
@@ -380,19 +410,20 @@ function renderRecentTrades(trades) {
         return;
     }
 
-    const tradesHTML = trades.slice(0, 5).map((trade, index) => {
+    const tradesHTML = trades.slice(0, 5).map((trade) => {
         const date = new Date(trade.timestamp);
         const timeStr = date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit' }) + ' ' +
                        date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
 
-        const actionColor = trade.action === 'BUY' ? '#27ae60' : '#e74c3c';
+        const actionClass = trade.action === 'BUY' ? 'buy' : 'sell';
+        const actionColor = trade.action === 'BUY' ? '#22c55e' : '#ef4444';
 
         return `
-            <div class="trade-item" style="background-color: ${index % 2 === 0 ? 'white' : '#f8f9fa'}; border-left-color: ${actionColor}">
+            <div class="trade-item ${actionClass}">
                 <div class="trade-header">
                     <span class="trade-time">${timeStr}</span>
-                    <span class="trade-stock">• ${trade.ticker}</span>
-                    <span style="color: ${actionColor}; font-weight: bold; margin-left: 10px">${trade.action}</span>
+                    <span class="trade-stock">${trade.ticker}</span>
+                    <span style="color: ${actionColor}; font-weight: 600; margin-left: auto; font-family: 'Inter', sans-serif; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;">${trade.action}</span>
                 </div>
                 <div class="trade-details">
                     ${trade.quantity} shares @ $${trade.price.toFixed(2)} = $${trade.total_cost.toLocaleString('en-US', {minimumFractionDigits: 2})}
@@ -413,7 +444,7 @@ function renderTimelineChart(dates, values) {
         return;
     }
 
-    const colors = values.map(v => v >= 100000 ? '#27ae60' : '#e74c3c');
+    const colors = values.map(v => v >= 100000 ? '#22c55e' : '#ef4444');
 
     const data = [{
         type: 'scatter',
@@ -422,37 +453,53 @@ function renderTimelineChart(dates, values) {
         y: values,
         name: 'Portfolio Value',
         line: {
-            color: '#3498db',
-            width: 3
+            color: '#3b82f6',
+            width: 3,
+            shape: 'spline'
         },
         marker: {
             size: 6,
             color: colors,
             line: {
-                color: 'white',
+                color: '#0d1421',
                 width: 2
             }
         },
         fill: 'tozeroy',
-        fillcolor: 'rgba(52, 152, 219, 0.1)',
+        fillcolor: 'rgba(59, 130, 246, 0.1)',
         hovertemplate: '<b>%{x}</b><br>$%{y:,.2f}<extra></extra>'
     }];
 
     const layout = {
         height: 400,
         xaxis: {
-            title: 'Date',
-            gridcolor: '#ecf0f1'
+            title: {
+                text: 'Date',
+                font: { color: '#64748b', size: 12, family: 'Inter, sans-serif' }
+            },
+            gridcolor: CONFIG.THEME.gridcolor,
+            linecolor: 'rgba(30, 58, 95, 0.4)',
+            tickfont: { color: '#64748b', size: 11, family: 'Inter, sans-serif' }
         },
         yaxis: {
-            title: 'Portfolio Value ($)',
-            gridcolor: '#ecf0f1',
-            tickformat: '$,.0f'
+            title: {
+                text: 'Portfolio Value ($)',
+                font: { color: '#64748b', size: 12, family: 'Inter, sans-serif' }
+            },
+            gridcolor: CONFIG.THEME.gridcolor,
+            linecolor: 'rgba(30, 58, 95, 0.4)',
+            tickformat: '$,.0f',
+            tickfont: { color: '#64748b', size: 11, family: 'JetBrains Mono, monospace' }
         },
         hovermode: 'x unified',
-        paper_bgcolor: 'rgba(0,0,0,0)',
-        plot_bgcolor: 'white',
-        margin: { t: 20, b: 50, l: 60, r: 20 },
+        hoverlabel: {
+            bgcolor: '#111827',
+            bordercolor: '#1e3a5f',
+            font: { family: 'JetBrains Mono, monospace', color: '#f8fafc' }
+        },
+        paper_bgcolor: CONFIG.THEME.paper_bgcolor,
+        plot_bgcolor: CONFIG.THEME.plot_bgcolor,
+        margin: { t: 20, b: 60, l: 70, r: 20 },
         shapes: [{
             type: 'line',
             x0: dates[0],
@@ -460,7 +507,7 @@ function renderTimelineChart(dates, values) {
             y0: 100000,
             y1: 100000,
             line: {
-                color: '#e74c3c',
+                color: 'rgba(239, 68, 68, 0.5)',
                 width: 2,
                 dash: 'dash'
             }
@@ -473,7 +520,8 @@ function renderTimelineChart(dates, values) {
             xanchor: 'left',
             font: {
                 size: 10,
-                color: '#e74c3c'
+                color: '#ef4444',
+                family: 'Inter, sans-serif'
             }
         }]
     };
@@ -518,25 +566,45 @@ function renderStockPricesChart(stocksData) {
     const layout = {
         height: 400,
         xaxis: {
-            title: 'Date',
-            gridcolor: '#ecf0f1'
+            title: {
+                text: 'Date',
+                font: { color: '#64748b', size: 12, family: 'Inter, sans-serif' }
+            },
+            gridcolor: CONFIG.THEME.gridcolor,
+            linecolor: 'rgba(30, 58, 95, 0.4)',
+            tickfont: { color: '#64748b', size: 11, family: 'Inter, sans-serif' }
         },
         yaxis: {
-            title: 'Stock Price ($)',
-            gridcolor: '#ecf0f1',
-            tickformat: '$,.2f'
+            title: {
+                text: 'Stock Price ($)',
+                font: { color: '#64748b', size: 12, family: 'Inter, sans-serif' }
+            },
+            gridcolor: CONFIG.THEME.gridcolor,
+            linecolor: 'rgba(30, 58, 95, 0.4)',
+            tickformat: '$,.2f',
+            tickfont: { color: '#64748b', size: 11, family: 'JetBrains Mono, monospace' }
         },
         hovermode: 'x unified',
+        hoverlabel: {
+            bgcolor: '#111827',
+            bordercolor: '#1e3a5f',
+            font: { family: 'JetBrains Mono, monospace', color: '#f8fafc' }
+        },
         legend: {
             orientation: 'h',
             yanchor: 'bottom',
             y: 1.02,
             xanchor: 'right',
-            x: 1
+            x: 1,
+            font: {
+                family: 'Inter, sans-serif',
+                size: 12,
+                color: '#94a3b8'
+            }
         },
-        paper_bgcolor: 'rgba(0,0,0,0)',
-        plot_bgcolor: 'white',
-        margin: { t: 40, b: 50, l: 60, r: 20 }
+        paper_bgcolor: CONFIG.THEME.paper_bgcolor,
+        plot_bgcolor: CONFIG.THEME.plot_bgcolor,
+        margin: { t: 40, b: 60, l: 70, r: 20 }
     };
 
     Plotly.newPlot('stock-prices-chart', traces, layout, {
