@@ -121,6 +121,19 @@ def execute_trade():
         quantity = int(data['quantity'])
         price = float(data['price'])
         note = data.get('note', '')
+        
+        # Parse date if provided
+        trade_date = None
+        if 'date' in data and data['date']:
+            try:
+                # Parse YYYY-MM-DD
+                dt = datetime.strptime(data['date'], '%Y-%m-%d')
+                # Add current time or noon to make it roughly accurate or just set to noon UTC
+                # Better: Use current time if today, otherwise noon?
+                # User asked for date selection. Noon is safe.
+                trade_date = dt.replace(hour=12, minute=0, second=0, tzinfo=timezone.utc)
+            except ValueError:
+                 return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
 
         # Validate ticker (basic check)
         if not ticker or len(ticker) > 12:
@@ -166,7 +179,8 @@ def execute_trade():
             action=action,
             quantity=quantity,
             price=price,
-            note=note
+            note=note,
+            timestamp=trade_date
         )
 
         # NO automatic snapshot - no API calls on trade

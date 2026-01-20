@@ -382,7 +382,7 @@ class PortfolioManager:
     # TRADING (unchanged)
     # ========================================
 
-    def record_trade(self, ticker: str, action: str, quantity: int, price: float, note: str = ""):
+    def record_trade(self, ticker: str, action: str, quantity: int, price: float, note: str = "", timestamp: datetime = None):
         """Record a trade in the database with full validation"""
         # Validate inputs
         self._assert_action(action, ticker)
@@ -391,6 +391,23 @@ class PortfolioManager:
 
         if action not in ['BUY', 'SELL']:
             raise ValueError(f"Invalid action: {action}")
+
+        # Use current time if no timestamp provided
+        if timestamp is None:
+            timestamp = datetime.now(timezone.utc)
+        
+        # Validation for backdated sells: Cannot sell before first purchase
+        if action == 'SELL':
+            first_buy = Trade.query.filter_by(ticker=ticker, action='BUY').order_by(Trade.timestamp).first()
+            if first_buy and timestamp < first_buy.timestamp:
+                 # Check if the date is earlier (ignoring time for user friendliness if needed, 
+                 # but strictly timestamp comparison is safer for data integrity)
+                 raise ValueError(f"Cannot sell before first purchase on {first_buy.timestamp.strftime('%Y-%m-%d')}")
+            
+            # If there are NO buys, it implies we are selling something we don't have record of buying.
+            # This is generally allowed in this system if we assume initial balances or such, 
+            # but strictly speaking it's odd. However, for "sell date earlier than buy date" check,
+            # we only care if a buy EXISTS and is LATER than this sell.
 
         total_cost = quantity * price
 
@@ -411,7 +428,6 @@ class PortfolioManager:
         self._assert_position(position_after, ticker, action, quantity)
         self._assert_cash(cash_after)
 
-        timestamp = datetime.now(timezone.utc)
         event_id = Trade.generate_event_id(timestamp, ticker, action, quantity, price)
 
         trade = Trade(
@@ -432,7 +448,7 @@ class PortfolioManager:
         db.session.add(trade)
         db.session.commit()
 
-        print(f"✓ Recorded {action}: {quantity} {ticker} @ ${price:.2f} = ${total_cost:,.2f}")
+        print(f"✓ Recorded {action}: {quantity} {ticker} @ ${price:.2f} = ${total_cost:,.2f} on {timestamp.strftime('%Y-%m-%d')}")
 
         return trade
 

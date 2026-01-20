@@ -321,6 +321,11 @@
                 </div>
 
                 <div class="form-group">
+                    <label for="trade-date">Trade Date</label>
+                    <input type="date" id="trade-date" required>
+                </div>
+
+                <div class="form-group">
                     <label for="quantity-input">Quantity (shares)</label>
                     <input type="number" id="quantity-input" min="1" value="100" required>
                 </div>
@@ -383,6 +388,10 @@
                     return;
                 }
             }
+
+            // Set default date to today
+            document.getElementById('trade-date').valueAsDate = new Date();
+
             document.getElementById('trade-modal').style.display = 'flex';
         }
 
@@ -432,9 +441,10 @@
             const exchange = document.getElementById('exchange-select').value;
             const quantity = parseInt(document.getElementById('quantity-input').value);
             const price = parseFloat(document.getElementById('price-input').value);
+            const date = document.getElementById('trade-date').value;
             const note = document.getElementById('note-input').value;
 
-            if (!ticker || !quantity || !price) {
+            if (!ticker || !quantity || !price || !date) {
                 showError('Please fill in all required fields');
                 return;
             }
@@ -460,6 +470,7 @@
                         action: action,
                         quantity: quantity,
                         price: price,
+                        date: date,
                         note: note || `${action} trade via dashboard`
                     })
                 });
