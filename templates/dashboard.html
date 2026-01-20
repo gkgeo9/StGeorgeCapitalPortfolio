@@ -290,7 +290,13 @@
     </div>
 
     <!-- Floating Trade Button (always visible) -->
-    <button class="admin-trade-btn" id="trade-btn" onclick="openTradeModal()">$</button>
+    <!-- Floating Trade Button (always visible) -->
+    <div
+        style="position: fixed; bottom: 30px; right: 30px; display: flex; flex-direction: column; align-items: center; gap: 15px; z-index: 1000;">
+        <button class="admin-trade-btn" id="reset-btn" onclick="resetDatabase()"
+            style="background: #e74c3c; width: 50px; height: 50px; font-size: 20px; position: static;">🗑️</button>
+        <button class="admin-trade-btn" id="trade-btn" onclick="openTradeModal()" style="position: static;">$</button>
+    </div>
 
     <!-- Trade Modal -->
     <div class="trade-modal" id="trade-modal">
@@ -503,6 +509,39 @@
                 closeTradeModal();
             }
         });
+
+        async function resetDatabase() {
+            var password = prompt("⚠ WARNING: This will delete ALL data!\nEnter password to confirm:");
+            if (password !== "deleteall") {
+                if (password) alert("Incorrect password.");
+                return;
+            }
+
+            if (!confirm("Are you ABSOLUTELY sure? This action cannot be undone.")) {
+                return;
+            }
+
+            showLoading(true);
+
+            try {
+                const response = await fetch('/api/reset_db', {
+                    method: 'POST'
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    alert("Database reset successfully.");
+                    location.reload();
+                } else {
+                    showError(data.error || "Reset failed");
+                }
+            } catch (error) {
+                console.error('Error resetting DB:', error);
+                showError('Failed to reset DB: ' + error.message);
+            } finally {
+                showLoading(false);
+            }
+        }
     </script>
 </body>
 

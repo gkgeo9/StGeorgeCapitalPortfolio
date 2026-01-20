@@ -361,3 +361,32 @@ def get_provider_status():
             'is_healthy': False,
             'error': str(e)
         }), 500
+
+
+@api_bp.route('/reset_db', methods=['POST'])
+def reset_database():
+    """
+    Reset the entire database (Nuclear Option).
+    Drops all tables and recreates them.
+    """
+    try:
+        # 1. Drop all tables
+        db.drop_all()
+        
+        # 2. Create all tables
+        db.create_all()
+        
+        # 3. Re-initialize portfolio defaults
+        pm = current_app.portfolio_manager
+        pm.initialize_portfolio()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Database reset successfully'
+        })
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
