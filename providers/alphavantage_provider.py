@@ -70,7 +70,7 @@ class AlphaVantageProvider:
 
     def get_provider_name(self) -> str:
         tier = "PAID" if self.is_paid_tier else "FREE"
-        return f"Alpha Vantage ({tier} tier)"
+        return f"AlphaVantage ({tier})"
 
     def get_quota_status(self) -> Dict:
         """Get current quota usage status"""

@@ -28,7 +28,7 @@ class Price(db.Model):
 
     # Audit fields from Daniel's CSV logger
     kind = db.Column(db.String(20), default='HISTORY')  # HISTORY, SNAPSHOT, TRADE
-    price_source = db.Column(db.String(20), default='yfinance')  # yfinance, user, alpha_vantage
+    price_source = db.Column(db.String(50), default='yfinance')  # yfinance, user, alpha_vantage
     out_of_order = db.Column(db.Boolean, default=False)
     note = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
