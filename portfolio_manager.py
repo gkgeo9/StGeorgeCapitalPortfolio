@@ -205,6 +205,10 @@ class PortfolioManager:
         if not stocks:
             return True, "No stocks to backfill."
 
+        # Include SPY benchmark for comparison charts
+        if 'SPY' not in stocks:
+            stocks = stocks + ['SPY']
+
         total_added = 0
         errors = []
 
@@ -596,6 +600,101 @@ class PortfolioManager:
         return {
             'dates': dates,
             'values': values
+        }
+
+    def get_portfolio_timeline_with_benchmark(self, days: int = 90, benchmark_ticker: str = 'SPY') -> Dict:
+        """Get portfolio timeline with S&P 500 (SPY) comparison data.
+
+        Returns:
+            Dictionary containing:
+            - dates: ISO format timestamps
+            - values: Portfolio absolute values
+            - portfolio_pct: Portfolio % change from start
+            - benchmark_values: SPY prices aligned to dates
+            - benchmark_pct: SPY % change from start
+            - benchmark_ticker: The benchmark ticker used
+        """
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+
+        # Get portfolio snapshots (same logic as get_portfolio_timeline)
+        snapshots = db.session.query(
+            Snapshot.timestamp,
+            func.max(Snapshot.portfolio_value).label('value')
+        ).filter(
+            Snapshot.timestamp >= cutoff_date
+        ).group_by(
+            Snapshot.timestamp
+        ).order_by(
+            Snapshot.timestamp
+        ).all()
+
+        if not snapshots:
+            return {
+                'dates': [],
+                'values': [],
+                'portfolio_pct': [],
+                'benchmark_values': [],
+                'benchmark_pct': [],
+                'benchmark_ticker': benchmark_ticker
+            }
+
+        dates = [s.timestamp.isoformat() for s in snapshots]
+        values = [float(s.value) for s in snapshots]
+
+        # Calculate portfolio % change from start
+        initial_value = values[0] if values else 0
+        portfolio_pct = []
+        for v in values:
+            if initial_value > 0:
+                pct = ((v / initial_value) - 1) * 100
+            else:
+                pct = 0
+            portfolio_pct.append(round(pct, 2))
+
+        # Get SPY benchmark prices for the date range
+        spy_prices = Price.query.filter(
+            Price.ticker == benchmark_ticker,
+            Price.timestamp >= cutoff_date
+        ).order_by(Price.timestamp).all()
+
+        # Create date -> price lookup (use date part only for matching)
+        spy_price_map = {p.timestamp.date(): float(p.close) for p in spy_prices}
+
+        benchmark_values = []
+        benchmark_pct = []
+        spy_initial = None
+
+        # Align SPY prices to portfolio snapshot dates
+        for s in snapshots:
+            snapshot_date = s.timestamp.date()
+
+            # Find SPY price for this date or closest previous date
+            spy_price = spy_price_map.get(snapshot_date)
+            if spy_price is None:
+                # Look for closest previous date
+                for spy_date in sorted(spy_price_map.keys(), reverse=True):
+                    if spy_date <= snapshot_date:
+                        spy_price = spy_price_map[spy_date]
+                        break
+
+            benchmark_values.append(spy_price)
+
+            # Calculate SPY percentage change
+            if spy_price is not None:
+                if spy_initial is None:
+                    spy_initial = spy_price
+                pct = ((spy_price / spy_initial) - 1) * 100 if spy_initial > 0 else 0
+                benchmark_pct.append(round(pct, 2))
+            else:
+                benchmark_pct.append(None)
+
+        return {
+            'dates': dates,
+            'values': values,
+            'portfolio_pct': portfolio_pct,
+            'benchmark_values': benchmark_values,
+            'benchmark_pct': benchmark_pct,
+            'benchmark_ticker': benchmark_ticker
         }
 
     def calculate_performance_metrics(self) -> Dict:
