@@ -84,7 +84,7 @@
             <!-- Holdings & Recent Activity -->
             <div class="card">
                 <h3>Current Holdings</h3>
-                <div id="holdings-table-container">
+                <div id="holdings-table-container" class="holdings-table-container">
                     <!-- Holdings table will be inserted here -->
                 </div>
 
@@ -115,7 +115,6 @@
     </div>
 
     <!-- Floating Trade Button (always visible) -->
-    <!-- Floating Trade Button (always visible) -->
     <div
         style="position: fixed; bottom: 30px; right: 30px; display: flex; flex-direction: column; align-items: center; gap: 15px; z-index: 1000;">
         <button class="admin-trade-btn" id="reset-btn" onclick="resetDatabase()"
@@ -141,13 +140,7 @@
                             <option value="LON">UK (LSE)</option>
                         </select>
                     </div>
-                    <datalist id="stock-suggestions">
-                        <option value="NVDA">NVDA - NVIDIA</option>
-                        <option value="MSFT">MSFT - Microsoft</option>
-                        <option value="AAPL">AAPL - Apple</option>
-                        <option value="SHOP">SHOP - Shopify (Select TSX for CAD)</option>
-                        <option value="RY">RY - Royal Bank (Select TSX for CAD)</option>
-                    </datalist>
+                    <datalist id="stock-suggestions"></datalist>
                 </div>
 
                 <div class="form-group">
@@ -234,10 +227,6 @@
         // Update price when stock is selected
         document.getElementById('stock-select').addEventListener('change', function (e) {
             let ticker = e.target.value.toUpperCase().trim();
-            // Try enabling "smart" price lookup? 
-            // For now, check if exact ticker exists in current prices
-            // Also check if adding the currently selected exchange suffix finds it
-
             const exchange = document.getElementById('exchange-select').value;
             let lookupTicker = ticker;
             if (exchange !== 'US' && !ticker.includes('.')) {
