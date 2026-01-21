@@ -27,7 +27,7 @@ class Config:
     }
 
     # Portfolio settings
-    DEFAULT_PORTFOLIO_STOCKS = ['NVDA', 'MSFT', 'AAPL', 'JPM', 'UNH']
+    DEFAULT_PORTFOLIO_STOCKS = []  # Stocks are dynamically tracked from trades/prices
     INITIAL_CASH = 100000
 
     # Alpha Vantage rate limiting

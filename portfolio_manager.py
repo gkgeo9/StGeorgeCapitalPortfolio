@@ -295,11 +295,6 @@ class PortfolioManager:
         Backfill historical price data using configured provider.
         Returns dict with success status and counts.
         """
-        # print(f"\n{'=' * 60}")
-        # print(f"BACKFILLING PRICE DATA")
-        # print(f"Using provider: {self.provider.get_provider_name()}")
-        # print(f"{'=' * 60}\n")
-
         result = {
             'success': True,
             'counts': {},
