@@ -217,12 +217,17 @@ def get_trades():
 
 @api_bp.route('/timeline')
 def get_timeline():
-    """Get portfolio value over time"""
+    """Get portfolio value over time with optional S&P 500 benchmark"""
     try:
         days = request.args.get('days', 90, type=int)
+        include_benchmark = request.args.get('include_benchmark', 'false').lower() == 'true'
+
         pm = current_app.portfolio_manager
 
-        timeline = pm.get_portfolio_timeline(days=days)
+        if include_benchmark:
+            timeline = pm.get_portfolio_timeline_with_benchmark(days=days)
+        else:
+            timeline = pm.get_portfolio_timeline(days=days)
 
         return jsonify(timeline)
 
