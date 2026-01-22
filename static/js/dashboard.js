@@ -991,11 +991,21 @@ function renderStockPricesChart() {
 }
 
 /**
- * Show/hide loading overlay
+ * Show/hide loading indicator (small spinner next to quota status)
  */
 function showLoading(show) {
-  const overlay = document.getElementById("loading-overlay");
-  overlay.style.display = show ? "flex" : "none";
+  const spinner = document.getElementById("loading-spinner");
+  const refreshBtn = document.getElementById("refresh-btn");
+
+  if (spinner) {
+    spinner.style.display = show ? "inline-block" : "none";
+  }
+
+  // Also disable the refresh button while loading
+  if (refreshBtn) {
+    refreshBtn.disabled = show;
+    refreshBtn.style.opacity = show ? "0.6" : "1";
+  }
 }
 
 /**
