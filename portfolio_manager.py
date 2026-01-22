@@ -746,18 +746,26 @@ class PortfolioManager:
             }
 
         values = np.array(timeline['values'])
-        returns = np.diff(values) / values[:-1]
 
-        # Annualized volatility: daily std * sqrt(252)
-        volatility = float(np.std(returns) * np.sqrt(252) * 100) if len(returns) > 0 else 0
+        # Step 1: Compute daily returns r_t = (P_t - P_{t-1}) / P_{t-1}
+        daily_returns = np.diff(values) / values[:-1]
 
-        # Annualized Sharpe Ratio: (mean excess return / std) * sqrt(252)
-        # Using 5% annual risk-free rate
-        risk_free_rate = 0.05 / 252  # Daily risk-free rate
-        excess_returns = returns - risk_free_rate
+        # Annualized volatility: daily std * sqrt(252) * 100 (as percentage)
+        daily_std = float(np.std(daily_returns)) if len(daily_returns) > 0 else 0
+        volatility = daily_std * np.sqrt(252) * 100
 
-        if len(returns) > 1 and np.std(excess_returns) > 0:
-            sharpe = float(np.mean(excess_returns) / np.std(excess_returns) * np.sqrt(252))
+        # Step 2: Get risk-free rate (stored as annual rate, e.g., 0.05 for 5%)
+        # Convert to daily: r_f_daily = r_f_annual / 252
+        annual_rf = self.get_risk_free_rate()
+        daily_rf = annual_rf / 252
+
+        # Step 3: Compute average daily excess return
+        avg_daily_return = float(np.mean(daily_returns)) if len(daily_returns) > 0 else 0
+        avg_excess_return = avg_daily_return - daily_rf
+
+        # Step 4: Annualized Sharpe = sqrt(252) * (avg_excess_return / daily_std)
+        if len(daily_returns) > 1 and daily_std > 0:
+            sharpe = float(np.sqrt(252) * (avg_excess_return / daily_std))
         else:
             sharpe = 0
 
@@ -765,6 +773,20 @@ class PortfolioManager:
             'volatility': volatility,
             'sharpe_ratio': sharpe
         }
+
+    def get_risk_free_rate(self) -> float:
+        """
+        Get the current risk-free rate (annual).
+        Uses the stored rate from FRED API, falls back to 4.5% if not available.
+        """
+        stored_rate = PortfolioConfig.get_value('risk_free_rate')
+        if stored_rate:
+            try:
+                return float(stored_rate)
+            except (ValueError, TypeError):
+                pass
+        # Default fallback (approximate current T-bill rate)
+        return 0.045
 
     def get_best_worst_stocks(self) -> Tuple[str, str]:
         """Identify best and worst performing stocks"""

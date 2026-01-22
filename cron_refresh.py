@@ -6,13 +6,16 @@ Run every 15 minutes via Railway cron: */15 * * * *
 Behavior:
   - First run of the day (around DAILY_BACKFILL_HOUR UTC): Full backfill + snapshot
   - All other runs: Quick price update only
+  - Weekly (Monday): Update risk-free rate from FRED API
 
 Configuration:
   DAILY_BACKFILL_HOUR: Hour (UTC) to run full backfill (default: 9 = 9 AM UTC)
+  FRED_API_KEY: Optional API key for FRED (free at https://fred.stlouisfed.org/docs/api/api_key.html)
 """
 
 import os
 import sys
+import requests
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
@@ -20,10 +23,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from app import create_app
-from models import db, Trade, Price
+from models import db, Trade, Price, PortfolioConfig
 
 # Configuration
 DAILY_BACKFILL_HOUR = int(os.environ.get('DAILY_BACKFILL_HOUR', 9))  # 9 AM UTC default
+FRED_API_KEY = os.environ.get('FRED_API_KEY')  # Optional - FRED API key
 
 
 def should_run_full_backfill():
@@ -31,6 +35,71 @@ def should_run_full_backfill():
     now = datetime.now(timezone.utc)
     # Run full backfill if we're within 15 minutes of the configured hour
     return now.hour == DAILY_BACKFILL_HOUR and now.minute < 15
+
+
+def should_update_risk_free_rate():
+    """Check if we should update risk-free rate (weekly on Monday around backfill hour)."""
+    now = datetime.now(timezone.utc)
+    # Monday = 0, run at same time as daily backfill
+    return now.weekday() == 0 and now.hour == DAILY_BACKFILL_HOUR and now.minute < 15
+
+
+def fetch_risk_free_rate_from_fred():
+    """
+    Fetch the 3-Month Treasury Bill rate from FRED API.
+    Series: DTB3 (3-Month Treasury Bill: Secondary Market Rate)
+    Returns annual rate as decimal (e.g., 0.045 for 4.5%)
+    """
+    if not FRED_API_KEY:
+        print("  No FRED_API_KEY set, skipping risk-free rate update")
+        return None
+
+    try:
+        # DTB3 = 3-Month Treasury Bill rate (most common risk-free proxy)
+        url = "https://api.stlouisfed.org/fred/series/observations"
+        params = {
+            'series_id': 'DTB3',
+            'api_key': FRED_API_KEY,
+            'file_type': 'json',
+            'sort_order': 'desc',
+            'limit': 5  # Get last few in case of missing data
+        }
+
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+
+        # Find the most recent non-missing value
+        for obs in data.get('observations', []):
+            value = obs.get('value', '.')
+            if value != '.':  # FRED uses '.' for missing data
+                rate_percent = float(value)
+                rate_decimal = rate_percent / 100  # Convert 4.5 -> 0.045
+                return rate_decimal
+
+        print("  No valid rate found in FRED response")
+        return None
+
+    except requests.RequestException as e:
+        print(f"  FRED API error: {e}")
+        return None
+    except (ValueError, KeyError) as e:
+        print(f"  Error parsing FRED response: {e}")
+        return None
+
+
+def update_risk_free_rate(app):
+    """Update the stored risk-free rate from FRED API."""
+    print("\n--- Weekly Risk-Free Rate Update ---")
+
+    rate = fetch_risk_free_rate_from_fred()
+
+    if rate is not None:
+        with app.app_context():
+            PortfolioConfig.set_value('risk_free_rate', str(rate))
+            print(f"  Updated risk-free rate: {rate * 100:.2f}% (annual)")
+    else:
+        print("  Could not fetch rate, keeping existing value")
 
 
 def run_quick_update(app):
@@ -143,6 +212,10 @@ def main():
     print(f"{'=' * 60}")
 
     app = create_app()
+
+    # Weekly: Update risk-free rate from FRED (Monday only)
+    if should_update_risk_free_rate():
+        update_risk_free_rate(app)
 
     # Check if we should run full backfill
     if should_run_full_backfill():
