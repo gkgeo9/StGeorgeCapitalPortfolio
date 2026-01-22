@@ -999,8 +999,6 @@ function updateLastUpdateTime() {
 
   document.getElementById("last-update-time").textContent = timeString;
 }
-<<<<<<< Updated upstream
-=======
 
 /**
  * Live Ticker Effect - adds coherent random noise to values for "real-time" feel
@@ -1087,4 +1085,3 @@ function storeLiveTickerBaseValues(portfolioData, holdingsData) {
     })) : []
   };
 }
->>>>>>> Stashed changes
