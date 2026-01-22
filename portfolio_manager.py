@@ -710,51 +710,28 @@ class PortfolioManager:
         if len(timeline['values']) < 2:
             return {
                 'volatility': 0,
-                'sharpe_ratio': 0,
-                'max_drawdown': 0,
-                'win_rate': 0
+                'sharpe_ratio': 0
             }
 
         values = np.array(timeline['values'])
         returns = np.diff(values) / values[:-1]
 
+        # Annualized volatility: daily std * sqrt(252)
         volatility = float(np.std(returns) * np.sqrt(252) * 100) if len(returns) > 0 else 0
 
-        peak = values[0]
-        max_dd = 0
-        for value in values:
-            if value > peak:
-                peak = value
-            dd = ((peak - value) / peak) * 100
-            if dd > max_dd:
-                max_dd = dd
-
-        trades = Trade.query.filter_by(action='BUY').all()
-        winning_trades = 0
-
-        if trades:
-            for trade in trades:
-                latest_price = Price.query.filter_by(ticker=trade.ticker) \
-                    .order_by(desc(Price.timestamp)) \
-                    .first()
-
-                if latest_price and float(latest_price.close) > float(trade.price):
-                    winning_trades += 1
-
-            win_rate = (winning_trades / len(trades) * 100)
-        else:
-            win_rate = 0
-
-        risk_free_rate = 0.05 / 252
+        # Annualized Sharpe Ratio: (mean excess return / std) * sqrt(252)
+        # Using 5% annual risk-free rate
+        risk_free_rate = 0.05 / 252  # Daily risk-free rate
         excess_returns = returns - risk_free_rate
-        sharpe = float(np.mean(excess_returns) / np.std(excess_returns) * np.sqrt(252)) if len(returns) > 1 and np.std(
-            excess_returns) > 0 else 0
+
+        if len(returns) > 1 and np.std(excess_returns) > 0:
+            sharpe = float(np.mean(excess_returns) / np.std(excess_returns) * np.sqrt(252))
+        else:
+            sharpe = 0
 
         return {
             'volatility': volatility,
-            'sharpe_ratio': sharpe,
-            'max_drawdown': max_dd,
-            'win_rate': win_rate
+            'sharpe_ratio': sharpe
         }
 
     def get_best_worst_stocks(self) -> Tuple[str, str]:

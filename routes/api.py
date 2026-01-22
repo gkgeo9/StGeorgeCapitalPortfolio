@@ -250,8 +250,6 @@ def get_performance():
             'total_return': round(stats['pnl_percent'], 2),
             'volatility': round(metrics['volatility'], 1),
             'sharpe_ratio': round(metrics['sharpe_ratio'], 2),
-            'max_drawdown': round(metrics['max_drawdown'], 1),
-            'win_rate': round(metrics['win_rate'], 1),
             'best_stock': best_stock,
             'worst_stock': worst_stock,
             'total_trades': Trade.query.count()

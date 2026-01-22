@@ -454,6 +454,9 @@ function renderKPICards(data) {
   // Use theme-aware default color for neutral KPIs
   const defaultColor = getTheme() === "dark" ? "#f8fafc" : "#1e3a5f";
 
+  // Sharpe ratio color: green if good (>1), yellow if ok (0-1), red if negative
+  const sharpeColor = data.sharpe_ratio >= 1 ? "#22c55e" : data.sharpe_ratio >= 0 ? "#f59e0b" : "#ef4444";
+
   const cards = [
     {
       value: `${isPositive ? "+" : ""}${data.total_return}%`,
@@ -462,21 +465,15 @@ function renderKPICards(data) {
       className: isPositive ? "positive" : "negative",
     },
     {
-      value: `${data.win_rate.toFixed(1)}%`,
-      label: "Win Rate",
-      color: defaultColor,
+      value: data.sharpe_ratio.toFixed(2),
+      label: "Sharpe Ratio",
+      color: sharpeColor,
       className: "",
     },
     {
       value: `${data.volatility.toFixed(1)}%`,
       label: "Volatility",
       color: defaultColor,
-      className: "",
-    },
-    {
-      value: `${data.max_drawdown.toFixed(1)}%`,
-      label: "Max Drawdown",
-      color: "#f59e0b",
       className: "",
     },
     {
@@ -1064,3 +1061,92 @@ function updateLastUpdateTime() {
 
   document.getElementById("last-update-time").textContent = timeString;
 }
+<<<<<<< Updated upstream
+=======
+
+/**
+ * Live Ticker Effect - adds coherent random noise to values for "real-time" feel
+ *
+ * The noise is applied consistently:
+ * 1. Each stock gets a random price multiplier (e.g., 1.001 = +0.1%)
+ * 2. Holding value = price * shares (calculated, not random)
+ * 3. Total stock value = sum of all holding values
+ * 4. Total portfolio value = stock value + cash
+ */
+function startLiveTicker() {
+  console.log("Starting live ticker effect...");
+
+  liveTickerInterval = setInterval(() => {
+    applyCoherentNoise();
+  }, CONFIG.LIVE_TICKER_INTERVAL);
+}
+
+function applyCoherentNoise() {
+  if (!liveTickerBaseValues.holdings || liveTickerBaseValues.holdings.length === 0) {
+    return;
+  }
+
+  // Step 1: Generate a noise multiplier for each stock (e.g., 0.999 to 1.001)
+  const noisedHoldings = liveTickerBaseValues.holdings.map(holding => {
+    const noiseMultiplier = 1 + (Math.random() - 0.5) * 2 * CONFIG.LIVE_TICKER_NOISE;
+    const noisedPrice = holding.price * noiseMultiplier;
+    const noisedValue = noisedPrice * holding.shares;
+    return {
+      price: noisedPrice,
+      value: noisedValue,
+      shares: holding.shares
+    };
+  });
+
+  // Step 2: Calculate total stock value from noised holdings
+  const noisedStockValue = noisedHoldings.reduce((sum, h) => sum + h.value, 0);
+
+  // Step 3: Total portfolio = stock value + cash (cash doesn't fluctuate)
+  const noisedTotalValue = noisedStockValue + liveTickerBaseValues.cash;
+
+  // Step 4: Update the DOM
+  const totalValueEl = document.getElementById("total-value");
+  if (totalValueEl) {
+    totalValueEl.textContent = formatCurrency(noisedTotalValue);
+  }
+
+  const stockValueEl = document.getElementById("stock-value");
+  if (stockValueEl) {
+    stockValueEl.textContent = formatCurrency(noisedStockValue);
+  }
+
+  // Update holdings table
+  const holdingsTable = document.querySelector(".holdings-table tbody");
+  if (holdingsTable) {
+    const rows = holdingsTable.querySelectorAll("tr");
+    rows.forEach((row, index) => {
+      const holding = noisedHoldings[index];
+      if (holding) {
+        const priceCell = row.querySelector("td:nth-child(3)");
+        const valueCell = row.querySelector("td:nth-child(4)");
+        if (priceCell) {
+          priceCell.textContent = formatCurrency(holding.price);
+        }
+        if (valueCell) {
+          valueCell.textContent = formatCurrency(holding.value);
+        }
+      }
+    });
+  }
+}
+
+function formatCurrency(value) {
+  return `$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function storeLiveTickerBaseValues(portfolioData, holdingsData) {
+  liveTickerBaseValues = {
+    cash: portfolioData.cash,
+    holdings: holdingsData ? holdingsData.map(h => ({
+      price: h.price,
+      value: h.value,
+      shares: h.shares
+    })) : []
+  };
+}
+>>>>>>> Stashed changes
