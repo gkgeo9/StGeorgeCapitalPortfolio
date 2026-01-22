@@ -7,7 +7,9 @@
 
 // Configuration
 const CONFIG = {
-  AUTO_REFRESH: false, // DISABLED automatic refresh
+  LIVE_TICKER_ENABLED: true, // Enable fake real-time price fluctuations
+  LIVE_TICKER_INTERVAL: 3000, // Update every 3 seconds
+  LIVE_TICKER_NOISE: 0.001, // Max noise: 0.1% of price
   // Premium dark theme chart colors
   CHART_COLORS: [
     "#3b82f6",
@@ -31,9 +33,6 @@ const CONFIG = {
     },
   },
 };
-
-// State
-let isRefreshing = false;
 
 // Timeline chart state
 let timelineData = null; // Cache fetched data for mode switching
@@ -131,6 +130,10 @@ function updateChartsForTheme(theme) {
   }
 }
 
+// Live ticker state - stores base values for noise calculation
+let liveTickerBaseValues = {};
+let liveTickerInterval = null;
+
 /**
  * Initialize dashboard on page load
  */
@@ -142,73 +145,11 @@ document.addEventListener("DOMContentLoaded", function () {
 
   loadAllData();
 
-  // No automatic refresh interval - all updates are manual now
-  console.log(
-    "Manual refresh mode enabled - use refresh button to update data",
-  );
+  // Start live ticker effect for "real-time" feel
+  if (CONFIG.LIVE_TICKER_ENABLED) {
+    startLiveTicker();
+  }
 });
-
-/**
- * Manual refresh button handler
- */
-async function refreshData() {
-  if (isRefreshing) {
-    showError("Refresh already in progress...");
-    return;
-  }
-
-  isRefreshing = true;
-  showLoading(true);
-  hideError();
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 60000);
-
-  try {
-    // Call the manual refresh API endpoint
-    const response = await fetch("/api/refresh", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-
-    // Check response status BEFORE attempting JSON parse
-    if (!response.ok) {
-      let errorMessage = `Server error (${response.status})`;
-      try {
-        const data = await response.json();
-        errorMessage = data.error || data.message || errorMessage;
-      } catch (parseError) {
-        // Response wasn't JSON (e.g., HTML error page from proxy)
-        if (response.status === 504 || response.status === 502) {
-          errorMessage = "Request timed out. The server may be busy - please try again.";
-        } else if (response.status === 429) {
-          errorMessage = "Too many requests. Please wait a moment before refreshing.";
-        }
-      }
-      throw new Error(errorMessage);
-    }
-
-    const data = await response.json();
-    // Success - reload all dashboard data
-    await loadAllData();
-    showSuccess(data.message || "Data refreshed successfully");
-  } catch (error) {
-    clearTimeout(timeoutId);
-    console.error("Error during refresh:", error);
-    if (error.name === "AbortError") {
-      showError("Request timed out. The server may be busy - please try again.");
-    } else {
-      showError("Failed to refresh data: " + error.message);
-    }
-  } finally {
-    isRefreshing = false;
-    showLoading(false);
-  }
-}
 
 /**
  * Load all dashboard data
@@ -281,6 +222,11 @@ async function loadPortfolio() {
     updatePortfolioStats(data);
     renderPieChart(data.holdings, data.cash);
     renderHoldingsTable(data.holdings);
+
+    // Store base values for live ticker noise effect
+    if (CONFIG.LIVE_TICKER_ENABLED) {
+      storeLiveTickerBaseValues(data, data.holdings);
+    }
   } catch (error) {
     console.error("Error loading portfolio:", error);
     throw error;
@@ -992,16 +938,8 @@ function renderStockPricesChart() {
  */
 function showLoading(show) {
   const spinner = document.getElementById("loading-spinner");
-  const refreshBtn = document.getElementById("refresh-btn");
-
   if (spinner) {
     spinner.style.display = show ? "inline-block" : "none";
-  }
-
-  // Also disable the refresh button while loading
-  if (refreshBtn) {
-    refreshBtn.disabled = show;
-    refreshBtn.style.opacity = show ? "0.6" : "1";
   }
 }
 

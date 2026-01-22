@@ -7,6 +7,7 @@ import numpy as np
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 from sqlalchemy import func, desc
+from flask import g
 from models import db, Price, Trade, Snapshot, PortfolioConfig
 from providers import create_provider
 
@@ -86,7 +87,16 @@ class PortfolioManager:
         """
         Get list of all stocks currently tracked in the portfolio.
         Combines default stocks (if DB empty) with any stocks present in positions or history.
+        Cached per-request to avoid repeated DB queries.
         """
+        # Check request-level cache first
+        try:
+            if hasattr(g, '_tracked_stocks_cache'):
+                return g._tracked_stocks_cache
+        except RuntimeError:
+            # Outside of request context (e.g., cron job)
+            pass
+
         # Get stocks from trades (positions)
         trade_tickers = db.session.query(Trade.ticker).distinct().all()
         trade_tickers = [t[0] for t in trade_tickers]
@@ -100,9 +110,17 @@ class PortfolioManager:
 
         # If database is empty, return defaults
         if not all_tickers:
-            return self.default_stocks
+            result = self.default_stocks
+        else:
+            result = sorted(list(all_tickers))
 
-        return sorted(list(all_tickers))
+        # Cache for this request
+        try:
+            g._tracked_stocks_cache = result
+        except RuntimeError:
+            pass
+
+        return result
 
     # ========================================
     # INITIALIZATION
@@ -150,20 +168,34 @@ class PortfolioManager:
             return self._get_prices_from_db()
 
     def _get_prices_from_db(self, partial_prices: Dict[str, float] = None) -> Dict[str, float]:
-        """Get latest prices from database as fallback"""
+        """Get latest prices from database - optimized single query instead of N queries"""
         prices = partial_prices if partial_prices else {}
         stocks = self.get_tracked_stocks()
 
-        for stock in stocks:
-            if prices.get(stock) is None:
-                latest_price = Price.query.filter_by(ticker=stock) \
-                    .order_by(desc(Price.timestamp)) \
-                    .first()
+        # Get stocks that need prices
+        stocks_needed = [s for s in stocks if prices.get(s) is None]
 
-                if latest_price:
-                    prices[stock] = float(latest_price.close)
-                else:
-                    # Return 0.0 instead of hardcoded $100 - this indicates missing data
+        if stocks_needed:
+            # Single query: get latest price for each stock using subquery
+            subquery = db.session.query(
+                Price.ticker,
+                func.max(Price.timestamp).label('max_ts')
+            ).filter(
+                Price.ticker.in_(stocks_needed)
+            ).group_by(Price.ticker).subquery()
+
+            latest_prices = db.session.query(Price.ticker, Price.close).join(
+                subquery,
+                (Price.ticker == subquery.c.ticker) & (Price.timestamp == subquery.c.max_ts)
+            ).all()
+
+            # Build prices dict from results
+            for ticker, close in latest_prices:
+                prices[ticker] = float(close)
+
+            # Check for missing stocks
+            for stock in stocks_needed:
+                if stock not in prices:
                     prices[stock] = 0.0
                     print(f"  WARNING: No price data available for {stock} - using $0.00")
 
@@ -503,42 +535,42 @@ class PortfolioManager:
     # PORTFOLIO CALCULATIONS (unchanged)
     # ========================================
 
-    def get_current_positions(self) -> Dict[str, int]:
-        """Get current stock positions by calculating from all trades"""
+    def get_positions_and_cash(self) -> tuple:
+        """Get positions and cash balance in single pass - avoids loading trades twice"""
         stocks = self.get_tracked_stocks()
         positions = {stock: 0 for stock in stocks}
+        initial_cash = float(PortfolioConfig.get_value('initial_cash', self.initial_cash))
+        cash = initial_cash
 
+        # Single query, single loop
         trades = Trade.query.order_by(Trade.timestamp).all()
 
         for trade in trades:
             if trade.action == 'BUY':
-                positions[trade.ticker] += trade.quantity
+                positions[trade.ticker] = positions.get(trade.ticker, 0) + trade.quantity
+                cash -= float(trade.total_cost)
             elif trade.action == 'SELL':
-                positions[trade.ticker] -= trade.quantity
+                positions[trade.ticker] = positions.get(trade.ticker, 0) - trade.quantity
+                cash += float(trade.total_cost)
 
+        return positions, cash
+
+    def get_current_positions(self) -> Dict[str, int]:
+        """Get current stock positions by calculating from all trades"""
+        positions, _ = self.get_positions_and_cash()
         return positions
 
     def get_cash_balance(self) -> float:
         """Calculate current cash balance from initial cash and all trades"""
-        initial_cash = float(PortfolioConfig.get_value('initial_cash', self.initial_cash))
-
-        trades = Trade.query.order_by(Trade.timestamp).all()
-
-        cash = initial_cash
-        for trade in trades:
-            if trade.action == 'BUY':
-                cash -= float(trade.total_cost)
-            elif trade.action == 'SELL':
-                cash += float(trade.total_cost)
-
+        _, cash = self.get_positions_and_cash()
         return cash
 
     def calculate_portfolio_stats(self) -> Dict:
         """Calculate portfolio statistics using DATABASE prices only (no API calls)."""
         # Use database prices ONLY - no API calls
         prices = self.get_prices_from_db()
-        positions = self.get_current_positions()
-        cash = self.get_cash_balance()
+        # Get positions and cash in single query (avoids loading trades twice)
+        positions, cash = self.get_positions_and_cash()
         initial_value = float(PortfolioConfig.get_value('initial_cash', self.initial_cash))
 
         stock_values = {}
