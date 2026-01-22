@@ -322,6 +322,13 @@ class PortfolioManager:
                     result['counts'][stock] = 0
                     continue
 
+                # Pre-fetch existing event_ids for this stock to avoid N+1 queries
+                existing_ids_query = db.session.query(Price.event_id).filter(
+                    Price.ticker == stock,
+                    Price.timestamp >= start_date
+                ).all()
+                existing_event_ids = {row[0] for row in existing_ids_query}
+
                 count = 0
                 for _, row in df.iterrows():
                     try:
@@ -333,8 +340,7 @@ class PortfolioManager:
                             note=note
                         )
 
-                        existing = Price.query.filter_by(event_id=event_id).first()
-                        if existing:
+                        if event_id in existing_event_ids:
                             continue
 
                         price = Price(

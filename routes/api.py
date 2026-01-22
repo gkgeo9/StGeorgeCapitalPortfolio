@@ -55,8 +55,8 @@ def manual_refresh():
         pm = current_app.portfolio_manager
 
         # Run manual backfill (with cooldown protection)
-        # Default is 365 days for initial backfill, incremental thereafter
-        success, message = pm.manual_backfill(default_lookback_days=365)
+        # 30 days lookback for faster refreshes on hosted platforms
+        success, message = pm.manual_backfill(default_lookback_days=30)
 
         if not success and "Cooldown" in message:
             return jsonify({
