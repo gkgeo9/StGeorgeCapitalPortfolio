@@ -161,6 +161,9 @@ async function refreshData() {
   showLoading(true);
   hideError();
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 60000);
+
   try {
     // Call the manual refresh API endpoint
     const response = await fetch("/api/refresh", {
@@ -168,25 +171,39 @@ async function refreshData() {
       headers: {
         "Content-Type": "application/json",
       },
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
+
+    // Check response status BEFORE attempting JSON parse
+    if (!response.ok) {
+      let errorMessage = `Server error (${response.status})`;
+      try {
+        const data = await response.json();
+        errorMessage = data.error || data.message || errorMessage;
+      } catch (parseError) {
+        // Response wasn't JSON (e.g., HTML error page from proxy)
+        if (response.status === 504 || response.status === 502) {
+          errorMessage = "Request timed out. The server may be busy - please try again.";
+        } else if (response.status === 429) {
+          errorMessage = "Too many requests. Please wait a moment before refreshing.";
+        }
+      }
+      throw new Error(errorMessage);
+    }
 
     const data = await response.json();
-
-    if (!response.ok) {
-      if (response.status === 429) {
-        // Cooldown active
-        showError(data.message);
-      } else {
-        throw new Error(data.error || "Refresh failed");
-      }
-    } else {
-      // Success - reload all dashboard data
-      await loadAllData();
-      showSuccess(data.message || "✓ Data refreshed successfully");
-    }
+    // Success - reload all dashboard data
+    await loadAllData();
+    showSuccess(data.message || "Data refreshed successfully");
   } catch (error) {
+    clearTimeout(timeoutId);
     console.error("Error during refresh:", error);
-    showError("Failed to refresh data: " + error.message);
+    if (error.name === "AbortError") {
+      showError("Request timed out. The server may be busy - please try again.");
+    } else {
+      showError("Failed to refresh data: " + error.message);
+    }
   } finally {
     isRefreshing = false;
     showLoading(false);
