@@ -1,8 +1,12 @@
 # Web framework
 Flask==3.1.0
 Flask-SQLAlchemy==3.1.1
+Flask-Login==0.6.3
 SQLAlchemy==2.0.36
 gunicorn==23.0.0
+
+# Authentication
+bcrypt==4.2.0
 
 # Database
 psycopg2-binary==2.9.10

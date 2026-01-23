@@ -38,6 +38,15 @@ class Config:
     # Session
     PERMANENT_SESSION_LIFETIME = timedelta(days=7)
 
+    # Authentication
+    ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'admin')
+    ADMIN_PASSWORD_HASH = os.environ.get('ADMIN_PASSWORD_HASH')
+
+    # Session security
+    SESSION_COOKIE_SECURE = os.environ.get('FLASK_ENV') != 'development'
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = 'Lax'
+
 
 class TestingConfig(Config):
     """Testing configuration with in-memory SQLite."""

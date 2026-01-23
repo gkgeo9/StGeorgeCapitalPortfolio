@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from config import get_config
 from models import db
 from portfolio_manager import PortfolioManager
+from auth import init_login_manager
 
 load_dotenv()
 
@@ -24,6 +25,7 @@ def create_app(config_name=None):
     app.config.from_object(get_config())
 
     db.init_app(app)
+    init_login_manager(app)
 
     portfolio_manager = PortfolioManager(app)
     app.portfolio_manager = portfolio_manager

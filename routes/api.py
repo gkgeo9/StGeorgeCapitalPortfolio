@@ -6,6 +6,7 @@ Now includes manual refresh/backfill endpoints.
 """
 
 from flask import Blueprint, jsonify, request, current_app
+from flask_login import login_required
 from sqlalchemy import desc
 from models import db, Price, Trade, Snapshot
 from datetime import datetime, timedelta, timezone
@@ -46,6 +47,7 @@ def get_portfolio():
 
 
 @api_bp.route('/refresh', methods=['POST'])
+@login_required
 def manual_refresh():
     """
     Manual refresh endpoint - THE ONLY PLACE that calls Alpha Vantage API.
@@ -82,6 +84,7 @@ def manual_refresh():
 
 
 @api_bp.route('/snapshot', methods=['POST'])
+@login_required
 def take_snapshot():
     """Take a manual snapshot of current portfolio state"""
     try:
@@ -105,6 +108,7 @@ def take_snapshot():
 
 
 @api_bp.route('/trade', methods=['POST'])
+@login_required
 def execute_trade():
     """Execute a buy or sell trade"""
     try:
@@ -367,6 +371,7 @@ def get_provider_status():
 
 
 @api_bp.route('/reset_db', methods=['POST'])
+@login_required
 def reset_database():
     """
     Reset the entire database (Nuclear Option).
