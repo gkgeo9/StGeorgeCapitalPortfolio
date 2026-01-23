@@ -5,10 +5,12 @@ Initializes app, database, and routes.
 """
 
 import os
+import logging
 from flask import Flask
 from dotenv import load_dotenv
 from config import get_config
 from models import db
+from extensions import csrf, limiter
 from portfolio_manager import PortfolioManager
 from auth import init_login_manager
 
@@ -24,7 +26,17 @@ def create_app(config_name=None):
 
     app.config.from_object(get_config())
 
+    # Configure logging
+    log_level = logging.DEBUG if app.config['DEBUG'] else logging.INFO
+    logging.basicConfig(
+        level=log_level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    logger = logging.getLogger(__name__)
+
     db.init_app(app)
+    csrf.init_app(app)
+    limiter.init_app(app)
     init_login_manager(app)
 
     portfolio_manager = PortfolioManager(app)
@@ -40,16 +52,19 @@ def create_app(config_name=None):
     app.register_blueprint(views_bp)
     app.register_blueprint(api_bp, url_prefix='/api')
 
-    print(f"\n{'=' * 50}")
-    print(f"St George Capital Portfolio")
-    print(f"{'=' * 50}")
-    print(f"Environment: {config_name}")
-    print(f"Provider: {portfolio_manager.provider.get_provider_name()}")
+    # Exempt API endpoints from CSRF (they use JSON, not forms)
+    csrf.exempt(api_bp)
+
+    logger.info("=" * 50)
+    logger.info("St George Capital Portfolio")
+    logger.info("=" * 50)
+    logger.info(f"Environment: {config_name}")
+    logger.info(f"Provider: {portfolio_manager.provider.get_provider_name()}")
     with app.app_context():
         stocks = portfolio_manager.get_tracked_stocks()
-        print(f"Stocks: {', '.join(stocks)}")
-    print(f"Refresh: Manual (via UI button)")
-    print(f"{'=' * 50}\n")
+        logger.info(f"Stocks: {', '.join(stocks)}")
+    logger.info("Refresh: Manual (via UI button)")
+    logger.info("=" * 50)
 
     return app
 

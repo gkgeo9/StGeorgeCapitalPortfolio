@@ -4,11 +4,25 @@ HTML page routes.
 Serves the main dashboard page and authentication routes.
 """
 
+from urllib.parse import urlparse
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app
 from flask_login import login_user, logout_user, login_required, current_user
 from auth import AdminUser
+from extensions import limiter
 
 views_bp = Blueprint('views', __name__)
+
+
+def is_safe_redirect_url(target):
+    """Check if the redirect URL is safe (internal only)."""
+    if not target:
+        return False
+    # Only allow relative URLs (starting with /)
+    if not target.startswith('/'):
+        return False
+    # Reject URLs with external host
+    parsed = urlparse(target)
+    return not parsed.netloc
 
 
 @views_bp.route('/')
@@ -18,6 +32,7 @@ def index():
 
 
 @views_bp.route('/login', methods=['GET', 'POST'])
+@limiter.limit("5 per minute", methods=["POST"])
 def login():
     """Admin login page"""
     if current_user.is_authenticated:
@@ -34,7 +49,7 @@ def login():
             login_user(user, remember=True)
 
             next_page = request.args.get('next')
-            if next_page:
+            if next_page and is_safe_redirect_url(next_page):
                 return redirect(next_page)
             return redirect(url_for('views.index'))
 

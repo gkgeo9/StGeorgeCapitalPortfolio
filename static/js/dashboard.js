@@ -154,7 +154,15 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   // Refresh market status every 5 minutes to detect market open/close
-  setInterval(loadQuotaStatus, 5 * 60 * 1000);
+  const quotaInterval = setInterval(loadQuotaStatus, 5 * 60 * 1000);
+
+  // Clean up intervals on page unload to prevent memory leaks
+  window.addEventListener("beforeunload", function () {
+    if (liveTickerInterval) {
+      clearInterval(liveTickerInterval);
+    }
+    clearInterval(quotaInterval);
+  });
 });
 
 /**

@@ -5,14 +5,25 @@ Configuration settings for the Flask application.
 
 import os
 from datetime import timedelta
+from dotenv import load_dotenv
+
+# Load environment variables before Config class is evaluated
+load_dotenv()
 
 
 class Config:
     """Application configuration."""
 
     # Flask
-    SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
     DEBUG = os.environ.get('FLASK_ENV') == 'development'
+
+    # Enforce SECRET_KEY in production
+    SECRET_KEY = os.environ.get('SECRET_KEY')
+    if not SECRET_KEY:
+        if DEBUG:
+            SECRET_KEY = 'dev-secret-key-change-in-production'
+        else:
+            raise RuntimeError("SECRET_KEY environment variable must be set in production")
 
     # Database (PostgreSQL)
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL', 'sqlite:///portfolio.db')
