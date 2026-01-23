@@ -43,6 +43,9 @@ let showBenchmark = true;
 let stockPricesData = null; // Cache fetched data for mode switching
 let stockChartMode = "absolute"; // 'absolute' or 'percentage'
 
+// Market status (from server - used for live ticker)
+let isMarketCurrentlyOpen = false; // Cached from /api/provider-status
+
 /**
  * Theme Management
  */
@@ -149,6 +152,9 @@ document.addEventListener("DOMContentLoaded", function () {
   if (CONFIG.LIVE_TICKER_ENABLED) {
     startLiveTicker();
   }
+
+  // Refresh market status every 5 minutes to detect market open/close
+  setInterval(loadQuotaStatus, 5 * 60 * 1000);
 });
 
 /**
@@ -184,6 +190,9 @@ async function loadQuotaStatus() {
   try {
     const response = await fetch("/api/provider-status");
     const data = await response.json();
+
+    // Cache market status for live ticker (server-side, not client time)
+    isMarketCurrentlyOpen = data.market_open === true;
 
     const quotaEl = document.getElementById("quota-status");
     if (quotaEl && data.quota) {
@@ -1018,14 +1027,20 @@ function startLiveTicker() {
 }
 
 function applyCoherentNoise() {
+  // Only apply noise during market hours (from server, not client time)
+  if (!isMarketCurrentlyOpen) {
+    return;
+  }
+
   if (!liveTickerBaseValues.holdings || liveTickerBaseValues.holdings.length === 0) {
     return;
   }
 
   // Step 1: Generate a noise multiplier for each stock (e.g., 0.999 to 1.001)
+  // Round to cents for realistic stock price granularity (no sub-cent prices)
   const noisedHoldings = liveTickerBaseValues.holdings.map(holding => {
     const noiseMultiplier = 1 + (Math.random() - 0.5) * 2 * CONFIG.LIVE_TICKER_NOISE;
-    const noisedPrice = holding.price * noiseMultiplier;
+    const noisedPrice = Math.round(holding.price * noiseMultiplier * 100) / 100;
     const noisedValue = noisedPrice * holding.shares;
     return {
       price: noisedPrice,
