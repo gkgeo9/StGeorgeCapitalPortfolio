@@ -154,14 +154,14 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   // Refresh market status every 5 minutes to detect market open/close
-  const quotaInterval = setInterval(loadQuotaStatus, 5 * 60 * 1000);
+  const marketStatusInterval = setInterval(loadMarketStatus, 5 * 60 * 1000);
 
   // Clean up intervals on page unload to prevent memory leaks
   window.addEventListener("beforeunload", function () {
     if (liveTickerInterval) {
       clearInterval(liveTickerInterval);
     }
-    clearInterval(quotaInterval);
+    clearInterval(marketStatusInterval);
   });
 });
 
@@ -179,6 +179,7 @@ async function loadAllData() {
       loadStockPrices(),
       loadTrades(),
       loadPerformance(),
+      loadMarketStatus(),
       loadQuotaStatus(),
     ]);
 
@@ -192,15 +193,40 @@ async function loadAllData() {
 }
 
 /**
- * Load API quota status (no API call to Alpha Vantage - just internal status)
+ * Load market status (public endpoint - works without login)
+ * Used for live ticker to know if market is open
  */
-async function loadQuotaStatus() {
+async function loadMarketStatus() {
   try {
-    const response = await fetch("/api/provider-status");
+    const response = await fetch("/api/market-status");
     const data = await response.json();
 
     // Cache market status for live ticker (server-side, not client time)
     isMarketCurrentlyOpen = data.market_open === true;
+  } catch (error) {
+    console.error("Error loading market status:", error);
+    // Default to false if we can't determine market status
+    isMarketCurrentlyOpen = false;
+  }
+}
+
+/**
+ * Load API quota status (requires login - shows quota info for admins)
+ */
+async function loadQuotaStatus() {
+  try {
+    const response = await fetch("/api/provider-status");
+
+    // If not logged in, this will return 401 - that's fine, just hide quota
+    if (!response.ok) {
+      const quotaEl = document.getElementById("quota-status");
+      if (quotaEl) {
+        quotaEl.textContent = "";
+      }
+      return;
+    }
+
+    const data = await response.json();
 
     const quotaEl = document.getElementById("quota-status");
     if (quotaEl && data.quota) {
@@ -220,7 +246,7 @@ async function loadQuotaStatus() {
     }
   } catch (error) {
     console.error("Error loading quota status:", error);
-    // Don't throw - quota display is optional
+    // Don't throw - quota display is optional and requires login
   }
 }
 

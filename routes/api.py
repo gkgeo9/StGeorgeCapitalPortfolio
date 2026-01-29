@@ -351,10 +351,30 @@ def get_stats():
         return jsonify({'error': 'An error occurred while fetching stats'}), 500
 
 
+@api_bp.route('/market-status')
+def get_market_status():
+    """Get market open/closed status (public endpoint for live ticker)"""
+    try:
+        pm = current_app.portfolio_manager
+        provider = pm.provider
+
+        market_open = None
+        try:
+            market_open = provider.is_market_open()
+        except Exception:
+            pass
+
+        return jsonify({'market_open': market_open})
+
+    except Exception as e:
+        logger.exception("Error in get_market_status")
+        return jsonify({'market_open': None}), 500
+
+
 @api_bp.route('/provider-status')
 @login_required
 def get_provider_status():
-    """Get current price provider status and quota info"""
+    """Get current price provider status and quota info (requires auth)"""
     try:
         pm = current_app.portfolio_manager
         provider = pm.provider
