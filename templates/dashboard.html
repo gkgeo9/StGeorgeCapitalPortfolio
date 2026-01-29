@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Investment Club Portfolio Dashboard</title>
+    <title>St. George Capital Portfolio</title>
 
     <!-- Google Fonts - Premium Typography -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -130,11 +130,19 @@
         <!-- Footer -->
         <footer class="footer">
             <p>Investment Club Dashboard • Manual refresh mode (data updates on button click)</p>
-            <p><a href="/api/stats" target="_blank">View API Stats</a></p>
+            <p>
+                <a href="/api/stats" target="_blank">View API Stats</a>
+                {% if is_admin %}
+                    • <a href="/logout">Logout</a>
+                {% else %}
+                    • <a href="/login">Admin</a>
+                {% endif %}
+            </p>
         </footer>
     </div>
 
-    <!-- Floating Trade Button (always visible) -->
+    {% if is_admin %}
+    <!-- Floating Trade Button (admin only) -->
     <div
         style="position: fixed; bottom: 30px; right: 30px; display: flex; flex-direction: column; align-items: center; gap: 15px; z-index: 1000;">
         <button class="admin-trade-btn" id="reset-btn" onclick="resetDatabase()"
@@ -194,10 +202,13 @@
             </form>
         </div>
     </div>
+    {% endif %}
 
     <!-- Custom JavaScript -->
     <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 
+    {% if is_admin %}
+    <!-- Admin-only JavaScript (trade and reset functions) -->
     <script>
         // Store current prices globally
         let currentPrices = {};
@@ -221,20 +232,8 @@
         };
 
         function openTradeModal() {
-            // Check if already authenticated in this session
-            if (sessionStorage.getItem('tradeAuth') !== 'true') {
-                var password = prompt("Enter trading password:");
-                if (password === "stgeorge") {
-                    sessionStorage.setItem('tradeAuth', 'true');
-                } else {
-                    alert("Incorrect password");
-                    return;
-                }
-            }
-
             // Set default date to today
             document.getElementById('trade-date').valueAsDate = new Date();
-
             document.getElementById('trade-modal').style.display = 'flex';
         }
 
@@ -317,7 +316,7 @@
                 const data = await response.json();
 
                 if (response.ok) {
-                    showSuccess(`✓ ${action} ${quantity} ${ticker} @ $${price.toFixed(2)} = $${(quantity * price).toFixed(2)}`);
+                    showSuccess(`${action} ${quantity} ${ticker} @ $${price.toFixed(2)} = $${(quantity * price).toFixed(2)}`);
                     closeTradeModal();
 
                     // Refresh all data after 1 second
@@ -344,13 +343,7 @@
         });
 
         async function resetDatabase() {
-            var password = prompt("⚠ WARNING: This will delete ALL data!\nEnter password to confirm:");
-            if (password !== "deleteall") {
-                if (password) alert("Incorrect password.");
-                return;
-            }
-
-            if (!confirm("Are you ABSOLUTELY sure? This action cannot be undone.")) {
+            if (!confirm("WARNING: This will delete ALL data!\nAre you ABSOLUTELY sure? This action cannot be undone.")) {
                 return;
             }
 
@@ -376,6 +369,7 @@
             }
         }
     </script>
+    {% endif %}
 </body>
 
 </html>

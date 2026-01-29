@@ -15,12 +15,20 @@ Configuration:
 
 import os
 import sys
+import logging
 import requests
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Configure logging for cron job
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 from app import create_app
 from models import db, Trade, Price, PortfolioConfig
@@ -51,7 +59,7 @@ def fetch_risk_free_rate_from_fred():
     Returns annual rate as decimal (e.g., 0.045 for 4.5%)
     """
     if not FRED_API_KEY:
-        print("  No FRED_API_KEY set, skipping risk-free rate update")
+        logger.info("No FRED_API_KEY set, skipping risk-free rate update")
         return None
 
     try:
@@ -77,48 +85,48 @@ def fetch_risk_free_rate_from_fred():
                 rate_decimal = rate_percent / 100  # Convert 4.5 -> 0.045
                 return rate_decimal
 
-        print("  No valid rate found in FRED response")
+        logger.warning("No valid rate found in FRED response")
         return None
 
     except requests.RequestException as e:
-        print(f"  FRED API error: {e}")
+        logger.error(f"FRED API error: {e}")
         return None
     except (ValueError, KeyError) as e:
-        print(f"  Error parsing FRED response: {e}")
+        logger.error(f"Error parsing FRED response: {e}")
         return None
 
 
 def update_risk_free_rate(app):
     """Update the stored risk-free rate from FRED API."""
-    print("\n--- Weekly Risk-Free Rate Update ---")
+    logger.info("--- Weekly Risk-Free Rate Update ---")
 
     rate = fetch_risk_free_rate_from_fred()
 
     if rate is not None:
         with app.app_context():
             PortfolioConfig.set_value('risk_free_rate', str(rate))
-            print(f"  Updated risk-free rate: {rate * 100:.2f}% (annual)")
+            logger.info(f"Updated risk-free rate: {rate * 100:.2f}% (annual)")
     else:
-        print("  Could not fetch rate, keeping existing value")
+        logger.warning("Could not fetch rate, keeping existing value")
 
 
 def run_quick_update(app):
     """Quick update - just fetch current prices and update today's record."""
-    print("\n--- Quick Price Update ---")
+    logger.info("--- Quick Price Update ---")
 
     with app.app_context():
         pm = app.portfolio_manager
         stocks = pm.get_tracked_stocks()
 
         if not stocks:
-            print("No stocks to update.")
+            logger.info("No stocks to update.")
             return
 
         # Include SPY benchmark
         if 'SPY' not in stocks:
             stocks = stocks + ['SPY']
 
-        print(f"Fetching current prices for {len(stocks)} stocks...")
+        logger.info(f"Fetching current prices for {len(stocks)} stocks...")
 
         # Get current prices from API
         prices = pm.provider.get_current_prices(stocks)
@@ -141,7 +149,7 @@ def run_quick_update(app):
                 # Update existing record
                 existing.close = price
                 existing.note = "intraday update"
-                print(f"  Updated {ticker}: ${price:.2f}")
+                logger.info(f"Updated {ticker}: ${price:.2f}")
             else:
                 # Create new record for today
                 event_id = Price.generate_event_id(
@@ -161,17 +169,17 @@ def run_quick_update(app):
                     note='intraday update'
                 )
                 db.session.add(new_price)
-                print(f"  Added {ticker}: ${price:.2f}")
+                logger.info(f"Added {ticker}: ${price:.2f}")
 
             updated += 1
 
         db.session.commit()
-        print(f"Updated {updated} prices.")
+        logger.info(f"Updated {updated} prices.")
 
 
 def run_full_backfill(app):
     """Full backfill - fetch historical data for new stocks, update stale data."""
-    print("\n--- Full Daily Backfill ---")
+    logger.info("--- Full Daily Backfill ---")
 
     with app.app_context():
         pm = app.portfolio_manager
@@ -179,37 +187,37 @@ def run_full_backfill(app):
         trade_count = Trade.query.count()
         price_count = Price.query.count()
         stocks = pm.get_tracked_stocks()
-        print(f"Database: {trade_count} trades, {price_count} prices")
-        print(f"Tracked stocks: {stocks}")
+        logger.info(f"Database: {trade_count} trades, {price_count} prices")
+        logger.info(f"Tracked stocks: {stocks}")
 
         if not stocks:
-            print("No stocks to update. Add trades first.")
+            logger.warning("No stocks to update. Add trades first.")
             return False
 
         # Bypass cooldown for cron jobs
         pm._last_backfill_ts = None
 
-        print("Starting smart backfill...")
+        logger.info("Starting smart backfill...")
         success, message = pm.manual_backfill(default_lookback_days=365)
 
         if success:
-            print(f"Backfill completed: {message}")
+            logger.info(f"Backfill completed: {message}")
 
-            print("Taking snapshot...")
+            logger.info("Taking snapshot...")
             snapshot_result = pm.take_snapshot(note="daily refresh")
-            print(f"Snapshot: Portfolio value ${snapshot_result['portfolio_value']:.2f}")
+            logger.info(f"Snapshot: Portfolio value ${snapshot_result['portfolio_value']:.2f}")
             return True
         else:
-            print(f"Backfill failed: {message}")
+            logger.error(f"Backfill failed: {message}")
             return False
 
 
 def main():
     now = datetime.now(timezone.utc)
-    print(f"\n{'=' * 60}")
-    print(f"CRON: Stock Data Refresh")
-    print(f"Time: {now.isoformat()}")
-    print(f"{'=' * 60}")
+    logger.info("=" * 60)
+    logger.info("CRON: Stock Data Refresh")
+    logger.info(f"Time: {now.isoformat()}")
+    logger.info("=" * 60)
 
     app = create_app()
 
@@ -219,19 +227,19 @@ def main():
 
     # Check if we should run full backfill
     if should_run_full_backfill():
-        print(f"First run of the day (hour={DAILY_BACKFILL_HOUR} UTC) - running full backfill")
+        logger.info(f"First run of the day (hour={DAILY_BACKFILL_HOUR} UTC) - running full backfill")
         success = run_full_backfill(app)
         if not success:
             sys.exit(1)
     else:
-        print(f"Regular run - quick price update only")
+        logger.info("Regular run - quick price update only")
 
     # Always run quick update to get latest prices
     run_quick_update(app)
 
-    print(f"\n{'=' * 60}")
-    print(f"CRON: Completed successfully")
-    print(f"{'=' * 60}\n")
+    logger.info("=" * 60)
+    logger.info("CRON: Completed successfully")
+    logger.info("=" * 60)
 
 
 if __name__ == "__main__":

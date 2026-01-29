@@ -3,6 +3,7 @@
 Core portfolio management logic using Alpha Vantage API.
 """
 
+import logging
 import numpy as np
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
@@ -10,6 +11,8 @@ from sqlalchemy import func, desc
 from flask import g
 from models import db, Price, Trade, Snapshot, PortfolioConfig
 from providers import create_provider
+
+logger = logging.getLogger(__name__)
 
 
 class PortfolioManager:
@@ -132,7 +135,7 @@ class PortfolioManager:
             if not PortfolioConfig.get_value('initial_cash'):
                 PortfolioConfig.set_value('initial_cash', self.initial_cash)
                 PortfolioConfig.set_value('start_date', datetime.now(timezone.utc).isoformat())
-                print(f"✓ Initialized portfolio with ${self.initial_cash:,.2f}")
+                logger.info(f"Initialized portfolio with ${self.initial_cash:,.2f}")
 
     # ========================================
     # PRICE FETCHING
@@ -151,20 +154,20 @@ class PortfolioManager:
         ONLY called during manual refresh - NEVER automatically.
         """
         stocks = self.get_tracked_stocks()
-        print(f"  Fetching live prices for {len(stocks)} stocks...")
+        logger.info(f"Fetching live prices for {len(stocks)} stocks...")
         try:
             prices = self.provider.get_current_prices(stocks)
 
             failed = [ticker for ticker, price in prices.items() if price is None]
             if failed:
-                print(f"  Some tickers failed: {failed}, filling from database...")
+                logger.warning(f"Some tickers failed: {failed}, filling from database...")
                 prices = self._get_prices_from_db(prices)
 
             return prices
 
         except Exception as e:
-            print(f"  Provider error: {e}")
-            print(f"  Falling back to database cache...")
+            logger.error(f"Provider error: {e}")
+            logger.info("Falling back to database cache...")
             return self._get_prices_from_db()
 
     def _get_prices_from_db(self, partial_prices: Dict[str, float] = None) -> Dict[str, float]:
@@ -197,7 +200,7 @@ class PortfolioManager:
             for stock in stocks_needed:
                 if stock not in prices:
                     prices[stock] = 0.0
-                    print(f"  WARNING: No price data available for {stock} - using $0.00")
+                    logger.warning(f"No price data available for {stock} - using $0.00")
 
         return prices
 
@@ -229,9 +232,9 @@ class PortfolioManager:
                 remaining = int(self._cooldown_seconds - elapsed)
                 return False, f"⏳ Cooldown active. Please wait {remaining} seconds before refreshing again."
 
-        print(f"\n{'=' * 60}")
-        print(f"STARTING MANUAL BACKFILL")
-        print(f"{'=' * 60}")
+        logger.info("=" * 60)
+        logger.info("STARTING MANUAL BACKFILL")
+        logger.info("=" * 60)
 
         stocks = self.get_tracked_stocks()
         if not stocks:
@@ -269,14 +272,14 @@ class PortfolioManager:
                 fetch_needed = False
                 
                 if not min_ts or not max_ts:
-                    print(f"[{stock}] No data found. Scheduling full backfill.")
+                    logger.info(f"[{stock}] No data found. Scheduling full backfill.")
                     start_date = year_ago.date()
                     fetch_needed = True
                 
                 else:
                     # Check if we need recent data
                     if max_ts.date() < (now - timedelta(days=1)).date():
-                         print(f"[{stock}] Data stale (last: {max_ts.date()}). Updating...")
+                         logger.info(f"[{stock}] Data stale (last: {max_ts.date()}). Updating...")
                          # We can just fetch from max_ts to now. 
                          # BUT if we ALSo need history, we should just do one big fetch or two?
                          # AlphaVantage 'full' gives everything. 'compact' gives 100 days.
@@ -287,7 +290,7 @@ class PortfolioManager:
                     # Check if we need MORE history
                     # If existing history starts AFTER year_ago (plus small buffer), we need older data.
                     if min_ts > (year_ago + timedelta(days=5)):
-                         print(f"[{stock}] Insufficient history (starts: {min_ts.date()}). Extending back to {year_ago.date()}...")
+                         logger.info(f"[{stock}] Insufficient history (starts: {min_ts.date()}). Extending back to {year_ago.date()}...")
                          start_date = year_ago.date() # This overrides the "update only" start date, which is good.
                          fetch_needed = True
 
@@ -306,10 +309,10 @@ class PortfolioManager:
                         errors.append(f"{stock}: {result.get('error')}")
 
                 else:
-                    print(f"[{stock}] Data is up to date (Range: {min_ts.date()} to {max_ts.date()})")
+                    logger.debug(f"[{stock}] Data is up to date (Range: {min_ts.date()} to {max_ts.date()})")
 
             except Exception as e:
-                print(f"[{stock}] Error determining backfill needs: {e}")
+                logger.error(f"[{stock}] Error determining backfill needs: {e}")
                 errors.append(f"{stock}: {str(e)}")
 
         self._last_backfill_ts = now
@@ -344,13 +347,13 @@ class PortfolioManager:
             
         for stock in stocks:
             try:
-                print(f"[{stock}] Fetching historical data...")
+                logger.info(f"[{stock}] Fetching historical data...")
 
                 # Use provider to get historical data
                 df = self.provider.get_historical_prices(stock, start_date, end_date)
 
                 if df.empty:
-                    print(f"[{stock}] No data returned")
+                    logger.warning(f"[{stock}] No data returned")
                     result['counts'][stock] = 0
                     continue
 
@@ -394,24 +397,24 @@ class PortfolioManager:
                         count += 1
 
                     except Exception as e:
-                        print(f"[{stock}] Error processing row: {e}")
+                        logger.error(f"[{stock}] Error processing row: {e}")
                         continue
 
                 db.session.commit()
                 result['counts'][stock] = count
-                print(f"[{stock}] Added {count} new price records")
+                logger.info(f"[{stock}] Added {count} new price records")
 
             except Exception as e:
-                print(f"[{stock}] Error during backfill: {e}")
+                logger.error(f"[{stock}] Error during backfill: {e}")
                 result['success'] = False
                 result['error'] = str(e)
                 result['counts'][stock] = 0
                 db.session.rollback()
                 continue
 
-        print(f"\n{'=' * 60}")
-        print(f"BACKFILL COMPLETE")
-        print(f"{'=' * 60}\n")
+        logger.info("=" * 60)
+        logger.info("BACKFILL COMPLETE")
+        logger.info("=" * 60)
 
         return result
 
@@ -485,7 +488,7 @@ class PortfolioManager:
         db.session.add(trade)
         db.session.commit()
 
-        print(f"✓ Recorded {action}: {quantity} {ticker} @ ${price:.2f} = ${total_cost:,.2f} on {timestamp.strftime('%Y-%m-%d')}")
+        logger.info(f"Recorded {action}: {quantity} {ticker} @ ${price:.2f} = ${total_cost:,.2f} on {timestamp.strftime('%Y-%m-%d')}")
 
         return trade
 
@@ -495,7 +498,7 @@ class PortfolioManager:
 
     def take_snapshot(self, note: str = "manual snapshot"):
         """Take a snapshot of current portfolio state using DATABASE prices only (no API calls)."""
-        print(f"\n📸 Taking portfolio snapshot...")
+        logger.info("Taking portfolio snapshot...")
 
         # Use database prices ONLY - no API calls
         prices = self.get_prices_from_db()
@@ -527,7 +530,7 @@ class PortfolioManager:
             db.session.add(snapshot)
 
         db.session.commit()
-        print(f"✓ Snapshot saved: Portfolio value ${portfolio_value:,.2f}")
+        logger.info(f"Snapshot saved: Portfolio value ${portfolio_value:,.2f}")
 
         return {'success': True, 'portfolio_value': portfolio_value}
 
@@ -585,7 +588,7 @@ class PortfolioManager:
             if price is None:
                 price = self._get_fallback_price_from_db(stock)
                 if price == 0.0 and shares > 0:
-                    print(f"  WARNING: No price for {stock} with {shares} shares - value will be $0")
+                    logger.warning(f"No price for {stock} with {shares} shares - value will be $0")
 
             value = shares * price
 

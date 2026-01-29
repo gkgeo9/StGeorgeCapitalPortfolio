@@ -4,11 +4,15 @@ Alpha Vantage price data provider.
 Official API with reliable rate limits.
 """
 
+import json
+import logging
 import requests
 import pandas as pd
 import time
 from datetime import datetime, date, timezone, timedelta
 from typing import Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class AlphaVantageError(Exception):
@@ -61,12 +65,12 @@ class AlphaVantageProvider:
             self.rate_limit_delay = 1  # Paid tier: 75 req/min = ~0.8s, use 1s to be safe
             self._daily_limit = float('inf')  # Unlimited
             self._minute_limit = 75
-            print(f"  Initialized Alpha Vantage provider (PAID tier, {self.rate_limit_delay}s delay)")
+            logger.info(f"Initialized Alpha Vantage provider (PAID tier, {self.rate_limit_delay}s delay)")
         else:
             self._daily_limit = 500
             self._minute_limit = 5
-            print(f"  Initialized Alpha Vantage provider (FREE tier, {self.rate_limit_delay}s delay)")
-            print(f"  WARNING: Free tier limited to {self._minute_limit} req/min, {self._daily_limit} req/day")
+            logger.info(f"Initialized Alpha Vantage provider (FREE tier, {self.rate_limit_delay}s delay)")
+            logger.warning(f"Free tier limited to {self._minute_limit} req/min, {self._daily_limit} req/day")
 
     def get_provider_name(self) -> str:
         tier = "PAID" if self.is_paid_tier else "FREE"
@@ -156,7 +160,7 @@ class AlphaVantageProvider:
             return False
 
         except Exception as e:
-            print(f"  Warning: Could not check market status: {e}")
+            logger.warning(f"Could not check market status: {e}")
             return True  # Assume open if can't check
 
     def _make_request(self, params: Dict) -> Dict:
@@ -172,7 +176,7 @@ class AlphaVantageProvider:
             try:
                 if attempt > 0:
                     wait_time = self.retry_delay * (2 ** attempt)
-                    print(f"  Retry attempt {attempt + 1}/{self.max_retries} after {wait_time}s...")
+                    logger.info(f"Retry attempt {attempt + 1}/{self.max_retries} after {wait_time}s...")
                     time.sleep(wait_time)
 
                 response = requests.get(self.base_url, params=params, timeout=30)
@@ -202,7 +206,7 @@ class AlphaVantageProvider:
                             retry_after=86400
                         )
                     else:
-                        print(f"  API Note: {note}")
+                        logger.info(f"API Note: {note}")
 
                 # Record successful call for quota tracking
                 self._record_call()
@@ -223,7 +227,9 @@ class AlphaVantageProvider:
             except (AlphaVantageQuotaError, AlphaVantageInvalidKeyError):
                 # Don't retry quota or auth errors
                 raise
-            except Exception as e:
+            except (requests.RequestException, ValueError, KeyError, json.JSONDecodeError) as e:
+                # Retry on network errors, parsing errors
+                logger.warning(f"Request failed (attempt {attempt + 1}): {e}")
                 if attempt < self.max_retries - 1:
                     continue
                 else:
@@ -239,7 +245,7 @@ class AlphaVantageProvider:
         tickers = self._validate_tickers(tickers)
         prices = {}
 
-        print(f"  Fetching {len(tickers)} prices from Alpha Vantage...")
+        logger.info(f"Fetching {len(tickers)} prices from Alpha Vantage...")
 
         for ticker in tickers:
             try:
@@ -260,13 +266,13 @@ class AlphaVantageProvider:
                     self._assert_price(price, ticker, "get_current_prices")
                     prices[ticker] = price
 
-                    print(f"  ✓ {ticker}: ${price:.2f}")
+                    logger.debug(f"{ticker}: ${price:.2f}")
                 else:
-                    print(f"  ✗ {ticker}: No quote data returned")
+                    logger.warning(f"{ticker}: No quote data returned")
                     prices[ticker] = None
 
             except Exception as e:
-                print(f"  ✗ {ticker}: Error - {e}")
+                logger.error(f"{ticker}: Error - {e}")
                 prices[ticker] = None
 
         return prices
@@ -294,7 +300,7 @@ class AlphaVantageProvider:
         days_requested = (end_date - start_date).days
         outputsize = 'full' if days_requested > 100 else 'compact'
 
-        print(f"  Fetching {ticker} history ({start_date} to {end_date}, {outputsize})...")
+        logger.info(f"Fetching {ticker} history ({start_date} to {end_date}, {outputsize})...")
 
         try:
             params = {
@@ -306,7 +312,7 @@ class AlphaVantageProvider:
             data = self._make_request(params)
 
             if 'Time Series (Daily)' not in data:
-                print(f"  Warning: No time series data for {ticker}")
+                logger.warning(f"No time series data for {ticker}")
                 return pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
 
             time_series = data['Time Series (Daily)']
@@ -328,7 +334,7 @@ class AlphaVantageProvider:
                     })
 
             if not rows:
-                print(f"  Warning: No data in requested date range")
+                logger.warning("No data in requested date range")
                 return pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
 
             df = pd.DataFrame(rows)
@@ -337,12 +343,12 @@ class AlphaVantageProvider:
             # Validate all data
             df = self.validate_price_data(df, ticker)
 
-            print(f"  ✓ Retrieved {len(df)} days of data for {ticker}")
+            logger.info(f"Retrieved {len(df)} days of data for {ticker}")
 
             return df
 
         except Exception as e:
-            print(f"  ✗ Error fetching {ticker}: {e}")
+            logger.error(f"Error fetching {ticker}: {e}")
             raise
 
     # ========================================

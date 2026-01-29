@@ -5,10 +5,14 @@ Returns JSON responses for frontend consumption.
 Now includes manual refresh/backfill endpoints.
 """
 
+import logging
 from flask import Blueprint, jsonify, request, current_app
+from flask_login import login_required
 from sqlalchemy import desc
 from models import db, Price, Trade, Snapshot
 from datetime import datetime, timedelta, timezone
+
+logger = logging.getLogger(__name__)
 
 api_bp = Blueprint('api', __name__)
 
@@ -42,10 +46,12 @@ def get_portfolio():
         })
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Error in get_portfolio")
+        return jsonify({'error': 'An error occurred while fetching portfolio data'}), 500
 
 
 @api_bp.route('/refresh', methods=['POST'])
+@login_required
 def manual_refresh():
     """
     Manual refresh endpoint - THE ONLY PLACE that calls Alpha Vantage API.
@@ -75,13 +81,15 @@ def manual_refresh():
         })
 
     except Exception as e:
+        logger.exception("Error in manual_refresh")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An error occurred during refresh'
         }), 500
 
 
 @api_bp.route('/snapshot', methods=['POST'])
+@login_required
 def take_snapshot():
     """Take a manual snapshot of current portfolio state"""
     try:
@@ -98,13 +106,15 @@ def take_snapshot():
         })
 
     except Exception as e:
+        logger.exception("Error in take_snapshot")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An error occurred while taking snapshot'
         }), 500
 
 
 @api_bp.route('/trade', methods=['POST'])
+@login_required
 def execute_trade():
     """Execute a buy or sell trade"""
     try:
@@ -120,7 +130,7 @@ def execute_trade():
         action = data['action'].upper()
         quantity = int(data['quantity'])
         price = float(data['price'])
-        note = data.get('note', '')
+        note = data.get('note', '')[:1000]  # Cap at 1000 chars
         
         # Parse date if provided
         trade_date = None
@@ -195,7 +205,8 @@ def execute_trade():
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Error in execute_trade")
+        return jsonify({'error': 'An error occurred while executing trade'}), 500
 
 
 @api_bp.route('/trades')
@@ -212,7 +223,8 @@ def get_trades():
         })
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Error in get_trades")
+        return jsonify({'error': 'An error occurred while fetching trades'}), 500
 
 
 @api_bp.route('/timeline')
@@ -232,7 +244,8 @@ def get_timeline():
         return jsonify(timeline)
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Error in get_timeline")
+        return jsonify({'error': 'An error occurred while fetching timeline'}), 500
 
 
 @api_bp.route('/performance')
@@ -256,7 +269,8 @@ def get_performance():
         })
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Error in get_performance")
+        return jsonify({'error': 'An error occurred while fetching performance'}), 500
 
 
 @api_bp.route('/prices/<ticker>')
@@ -278,7 +292,8 @@ def get_stock_prices(ticker):
         })
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Error in get_stock_prices")
+        return jsonify({'error': 'An error occurred while fetching stock prices'}), 500
 
 
 @api_bp.route('/stocks')
@@ -304,12 +319,14 @@ def get_all_stocks():
         return jsonify(stocks_data)
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Error in get_all_stocks")
+        return jsonify({'error': 'An error occurred while fetching stocks'}), 500
 
 
 @api_bp.route('/stats')
+@login_required
 def get_stats():
-    """Get database statistics"""
+    """Get database statistics (requires authentication)"""
     try:
         pm = current_app.portfolio_manager
         cash = pm.get_cash_balance()
@@ -330,10 +347,12 @@ def get_stats():
         })
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.exception("Error in get_stats")
+        return jsonify({'error': 'An error occurred while fetching stats'}), 500
 
 
 @api_bp.route('/provider-status')
+@login_required
 def get_provider_status():
     """Get current price provider status and quota info"""
     try:
@@ -359,14 +378,16 @@ def get_provider_status():
         return jsonify(status)
 
     except Exception as e:
+        logger.exception("Error in get_provider_status")
         return jsonify({
             'provider': 'unknown',
             'is_healthy': False,
-            'error': str(e)
+            'error': 'An error occurred while fetching provider status'
         }), 500
 
 
 @api_bp.route('/reset_db', methods=['POST'])
+@login_required
 def reset_database():
     """
     Reset the entire database (Nuclear Option).
@@ -389,7 +410,8 @@ def reset_database():
         })
 
     except Exception as e:
+        logger.exception("Error in reset_database")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An error occurred while resetting database'
         }), 500
