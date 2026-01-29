@@ -3,6 +3,7 @@
 Core portfolio management logic using Alpha Vantage API.
 """
 
+import bisect
 import logging
 import numpy as np
 from datetime import datetime, timedelta, timezone
@@ -435,14 +436,20 @@ class PortfolioManager:
         # Use current time if no timestamp provided
         if timestamp is None:
             timestamp = datetime.now(timezone.utc)
-        
+        # Ensure timestamp is timezone-aware
+        elif timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+
         # Validation for backdated sells: Cannot sell before first purchase
         if action == 'SELL':
             first_buy = Trade.query.filter_by(ticker=ticker, action='BUY').order_by(Trade.timestamp).first()
-            if first_buy and timestamp < first_buy.timestamp:
-                 # Check if the date is earlier (ignoring time for user friendliness if needed, 
-                 # but strictly timestamp comparison is safer for data integrity)
-                 raise ValueError(f"Cannot sell before first purchase on {first_buy.timestamp.strftime('%Y-%m-%d')}")
+            if first_buy:
+                # Ensure first_buy timestamp is also timezone-aware for comparison
+                first_buy_ts = first_buy.timestamp
+                if first_buy_ts.tzinfo is None:
+                    first_buy_ts = first_buy_ts.replace(tzinfo=timezone.utc)
+                if timestamp < first_buy_ts:
+                    raise ValueError(f"Cannot sell before first purchase on {first_buy.timestamp.strftime('%Y-%m-%d')}")
             
             # If there are NO buys, it implies we are selling something we don't have record of buying.
             # This is generally allowed in this system if we assume initial balances or such, 
@@ -701,6 +708,9 @@ class PortfolioManager:
         # Create date -> price lookup (use date part only for matching)
         spy_price_map = {p.timestamp.date(): float(p.close) for p in spy_prices}
 
+        # Pre-sort SPY dates once for O(log n) lookups instead of O(n) per snapshot
+        sorted_spy_dates = sorted(spy_price_map.keys())
+
         benchmark_values = []
         benchmark_pct = []
         spy_initial = None
@@ -711,12 +721,11 @@ class PortfolioManager:
 
             # Find SPY price for this date or closest previous date
             spy_price = spy_price_map.get(snapshot_date)
-            if spy_price is None:
-                # Look for closest previous date
-                for spy_date in sorted(spy_price_map.keys(), reverse=True):
-                    if spy_date <= snapshot_date:
-                        spy_price = spy_price_map[spy_date]
-                        break
+            if spy_price is None and sorted_spy_dates:
+                # Use binary search to find closest previous date - O(log n)
+                idx = bisect.bisect_right(sorted_spy_dates, snapshot_date) - 1
+                if idx >= 0:
+                    spy_price = spy_price_map[sorted_spy_dates[idx]]
 
             benchmark_values.append(spy_price)
 
