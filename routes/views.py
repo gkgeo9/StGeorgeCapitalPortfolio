@@ -1,8 +1,6 @@
 # routes/views.py
-"""
-HTML page routes.
-Serves the main dashboard page and authentication routes.
-"""
+
+"""HTML page routes for dashboard and authentication."""
 
 from urllib.parse import urlparse
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app
@@ -27,14 +25,12 @@ def is_safe_redirect_url(target):
 
 @views_bp.route('/')
 def index():
-    """Main dashboard page - public read-only access, admin sees controls"""
     return render_template('dashboard.html', is_admin=current_user.is_authenticated)
 
 
 @views_bp.route('/login', methods=['GET', 'POST'])
 @limiter.limit("5 per minute", methods=["POST"])
 def login():
-    """Admin login page"""
     if current_user.is_authenticated:
         return redirect(url_for('views.index'))
 
@@ -61,7 +57,6 @@ def login():
 @views_bp.route('/logout')
 @login_required
 def logout():
-    """Log out the current user"""
     logout_user()
     flash('You have been logged out.', 'info')
     return redirect(url_for('views.index'))
@@ -69,5 +64,4 @@ def logout():
 
 @views_bp.route('/health')
 def health():
-    """Health check endpoint for deployment platforms"""
     return {'status': 'healthy'}, 200

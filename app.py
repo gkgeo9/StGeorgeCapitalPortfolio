@@ -1,8 +1,6 @@
 # app.py
-"""
-Main Flask application entry point.
-Initializes app, database, and routes.
-"""
+
+"""Main Flask application entry point."""
 
 import os
 import logging
@@ -18,7 +16,6 @@ load_dotenv()
 
 
 def create_app(config_name=None):
-    """Application factory pattern"""
     app = Flask(__name__)
 
     if config_name is None:
@@ -26,7 +23,6 @@ def create_app(config_name=None):
 
     app.config.from_object(get_config())
 
-    # Configure logging
     log_level = logging.DEBUG if app.config['DEBUG'] else logging.INFO
     logging.basicConfig(
         level=log_level,
@@ -52,7 +48,6 @@ def create_app(config_name=None):
     app.register_blueprint(views_bp)
     app.register_blueprint(api_bp, url_prefix='/api')
 
-    # Exempt API endpoints from CSRF (they use JSON, not forms)
     csrf.exempt(api_bp)
 
     logger.info("=" * 50)

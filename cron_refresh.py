@@ -1,29 +1,32 @@
 #!/usr/bin/env python3
 """
-Cron job script for scheduled data refresh.
-Run every 15 minutes via Railway cron: */15 * * * *
+Cron job for scheduled data refresh. Run every 15 minutes.
 
-Behavior:
-  - First run of the day (around DAILY_BACKFILL_HOUR UTC): Full backfill + snapshot
-  - All other runs: Quick price update only
-  - Weekly (Monday): Update risk-free rate from FRED API
+Schedule behavior:
+- Weekends: Skip entirely
+- 9 AM UTC: Full backfill + snapshot (pre-market)
+- 9:30 AM - 4:00 PM ET (market hours): Intraday price updates
+- 4:00-4:30 PM ET: Save daily close prices
+- Outside market hours: Skip updates
 
-Configuration:
-  DAILY_BACKFILL_HOUR: Hour (UTC) to run full backfill (default: 9 = 9 AM UTC)
-  FRED_API_KEY: Optional API key for FRED (free at https://fred.stlouisfed.org/docs/api/api_key.html)
+Weekly Monday: Update risk-free rate from FRED
 """
 
 import os
 import sys
 import logging
 import requests
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Configure logging for cron job
+# Use public DATABASE_URL for cron jobs if available
+# (Railway internal network not accessible from cron containers)
+if os.environ.get('DATABASE_PUBLIC_URL'):
+    os.environ['DATABASE_URL'] = os.environ['DATABASE_PUBLIC_URL']
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -34,56 +37,81 @@ from app import create_app
 from models import db, Trade, Price, PortfolioConfig
 
 # Configuration
-DAILY_BACKFILL_HOUR = int(os.environ.get('DAILY_BACKFILL_HOUR', 9))  # 9 AM UTC default
-FRED_API_KEY = os.environ.get('FRED_API_KEY')  # Optional - FRED API key
+DAILY_BACKFILL_HOUR = int(os.environ.get('DAILY_BACKFILL_HOUR', 9))
+FRED_API_KEY = os.environ.get('FRED_API_KEY')
+
+# Market hours in UTC (ET + 5, or ET + 4 during DST)
+# Using conservative estimates that work year-round
+MARKET_OPEN_UTC = 14   # 9:30 AM ET = 14:30 UTC (winter) / 13:30 UTC (summer)
+MARKET_CLOSE_UTC = 21  # 4:00 PM ET = 21:00 UTC (winter) / 20:00 UTC (summer)
+
+
+def is_weekend():
+    """Check if today is a weekend (Sat=5, Sun=6)."""
+    return datetime.now(timezone.utc).weekday() >= 5
+
+
+def is_within_range(hour, minute, target_hour, buffer_minutes=20):
+    """Check if current time is within buffer of target hour."""
+    now_minutes = hour * 60 + minute
+    target_minutes = target_hour * 60
+    return abs(now_minutes - target_minutes) <= buffer_minutes
 
 
 def should_run_full_backfill():
-    """Check if we should run full backfill (first run of the day around configured hour)."""
+    """Check if we should run full backfill (around configured hour, with buffer)."""
     now = datetime.now(timezone.utc)
-    # Run full backfill if we're within 15 minutes of the configured hour
-    return now.hour == DAILY_BACKFILL_HOUR and now.minute < 15
+    return is_within_range(now.hour, now.minute, DAILY_BACKFILL_HOUR, buffer_minutes=20)
 
 
 def should_update_risk_free_rate():
-    """Check if we should update risk-free rate (weekly on Monday around backfill hour)."""
+    """Check if we should update risk-free rate (Monday around backfill hour)."""
     now = datetime.now(timezone.utc)
-    # Monday = 0, run at same time as daily backfill
-    return now.weekday() == 0 and now.hour == DAILY_BACKFILL_HOUR and now.minute < 15
+    return now.weekday() == 0 and should_run_full_backfill()
+
+
+def is_market_hours():
+    """Check if we're within US market hours (with buffer for timing variations)."""
+    now = datetime.now(timezone.utc)
+    # Market hours: roughly 14:00-21:00 UTC (varies with DST)
+    # Add 30 min buffer on each side
+    return 13 <= now.hour <= 21
+
+
+def should_save_daily_close():
+    """Check if we should save daily close (shortly after market close)."""
+    now = datetime.now(timezone.utc)
+    # Save close between 21:00-21:30 UTC (4:00-4:30 PM ET winter)
+    # or 20:00-20:30 UTC (4:00-4:30 PM ET summer)
+    # Use wider window 20:00-21:30 to catch both DST scenarios
+    return 20 <= now.hour <= 21 and (now.hour == 20 or now.minute <= 30)
 
 
 def fetch_risk_free_rate_from_fred():
-    """
-    Fetch the 3-Month Treasury Bill rate from FRED API.
-    Series: DTB3 (3-Month Treasury Bill: Secondary Market Rate)
-    Returns annual rate as decimal (e.g., 0.045 for 4.5%)
-    """
+    """Fetch 3-Month Treasury Bill rate (DTB3) from FRED."""
     if not FRED_API_KEY:
         logger.info("No FRED_API_KEY set, skipping risk-free rate update")
         return None
 
     try:
-        # DTB3 = 3-Month Treasury Bill rate (most common risk-free proxy)
         url = "https://api.stlouisfed.org/fred/series/observations"
         params = {
             'series_id': 'DTB3',
             'api_key': FRED_API_KEY,
             'file_type': 'json',
             'sort_order': 'desc',
-            'limit': 5  # Get last few in case of missing data
+            'limit': 5
         }
 
         response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
 
-        # Find the most recent non-missing value
         for obs in data.get('observations', []):
             value = obs.get('value', '.')
-            if value != '.':  # FRED uses '.' for missing data
+            if value != '.':
                 rate_percent = float(value)
-                rate_decimal = rate_percent / 100  # Convert 4.5 -> 0.045
-                return rate_decimal
+                return rate_percent / 100
 
         logger.warning("No valid rate found in FRED response")
         return None
@@ -99,7 +127,6 @@ def fetch_risk_free_rate_from_fred():
 def update_risk_free_rate(app):
     """Update the stored risk-free rate from FRED API."""
     logger.info("--- Weekly Risk-Free Rate Update ---")
-
     rate = fetch_risk_free_rate_from_fred()
 
     if rate is not None:
@@ -110,9 +137,9 @@ def update_risk_free_rate(app):
         logger.warning("Could not fetch rate, keeping existing value")
 
 
-def run_quick_update(app):
-    """Quick update - just fetch current prices and update today's record."""
-    logger.info("--- Quick Price Update ---")
+def run_price_update(app, kind='INTRADAY', note='intraday update'):
+    """Fetch current prices and save to database."""
+    logger.info(f"--- Price Update ({kind}) ---")
 
     with app.app_context():
         pm = app.portfolio_manager
@@ -122,16 +149,12 @@ def run_quick_update(app):
             logger.info("No stocks to update.")
             return
 
-        # Include SPY benchmark
         if 'SPY' not in stocks:
             stocks = stocks + ['SPY']
 
-        logger.info(f"Fetching current prices for {len(stocks)} stocks...")
-
-        # Get current prices from API
+        logger.info(f"Fetching prices for {len(stocks)} stocks...")
         prices = pm.provider.get_current_prices(stocks)
 
-        # Update/insert today's price for each stock
         today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
         updated = 0
 
@@ -139,37 +162,35 @@ def run_quick_update(app):
             if price is None:
                 continue
 
-            # Check if we have a price record for today
             existing = Price.query.filter(
                 Price.ticker == ticker,
                 Price.timestamp >= today
             ).first()
 
             if existing:
-                # Update existing record
                 existing.close = price
-                existing.note = "intraday update"
-                logger.info(f"Updated {ticker}: ${price:.2f}")
+                existing.kind = kind
+                existing.note = note
+                logger.info(f"Updated {ticker}: ${price:.2f} ({kind})")
             else:
-                # Create new record for today
                 event_id = Price.generate_event_id(
                     ticker=ticker,
                     timestamp=today,
                     close=price,
-                    kind='INTRADAY',
-                    note='intraday update'
+                    kind=kind,
+                    note=note
                 )
                 new_price = Price(
                     event_id=event_id,
                     ticker=ticker,
                     timestamp=today,
                     close=price,
-                    kind='INTRADAY',
+                    kind=kind,
                     price_source=pm.provider.get_provider_name(),
-                    note='intraday update'
+                    note=note
                 )
                 db.session.add(new_price)
-                logger.info(f"Added {ticker}: ${price:.2f}")
+                logger.info(f"Added {ticker}: ${price:.2f} ({kind})")
 
             updated += 1
 
@@ -194,7 +215,6 @@ def run_full_backfill(app):
             logger.warning("No stocks to update. Add trades first.")
             return False
 
-        # Bypass cooldown for cron jobs
         pm._last_backfill_ts = None
 
         logger.info("Starting smart backfill...")
@@ -202,7 +222,6 @@ def run_full_backfill(app):
 
         if success:
             logger.info(f"Backfill completed: {message}")
-
             logger.info("Taking snapshot...")
             snapshot_result = pm.take_snapshot(note="daily refresh")
             logger.info(f"Snapshot: Portfolio value ${snapshot_result['portfolio_value']:.2f}")
@@ -212,30 +231,65 @@ def run_full_backfill(app):
             return False
 
 
+def check_market_status_api(app):
+    """Check market status via provider API."""
+    try:
+        with app.app_context():
+            return app.portfolio_manager.provider.is_market_open()
+    except Exception as e:
+        logger.warning(f"Could not check market status: {e}")
+        return None
+
+
 def main():
     now = datetime.now(timezone.utc)
     logger.info("=" * 60)
     logger.info("CRON: Stock Data Refresh")
-    logger.info(f"Time: {now.isoformat()}")
+    logger.info(f"Time: {now.strftime('%Y-%m-%d %H:%M:%S')} UTC")
+    logger.info(f"Day: {now.strftime('%A')}")
     logger.info("=" * 60)
+
+    # Skip weekends entirely
+    if is_weekend():
+        logger.info("Weekend - skipping all updates")
+        return
 
     app = create_app()
 
-    # Weekly: Update risk-free rate from FRED (Monday only)
+    # Weekly Monday: Update risk-free rate from FRED
     if should_update_risk_free_rate():
         update_risk_free_rate(app)
 
-    # Check if we should run full backfill
+    # Morning: Full backfill (runs before market opens)
     if should_run_full_backfill():
-        logger.info(f"First run of the day (hour={DAILY_BACKFILL_HOUR} UTC) - running full backfill")
+        logger.info(f"Morning backfill window (hour ~{DAILY_BACKFILL_HOUR} UTC)")
         success = run_full_backfill(app)
         if not success:
             sys.exit(1)
-    else:
-        logger.info("Regular run - quick price update only")
+        logger.info("=" * 60)
+        logger.info("CRON: Completed successfully")
+        logger.info("=" * 60)
+        return
 
-    # Always run quick update to get latest prices
-    run_quick_update(app)
+    # Check actual market status from API
+    market_open = check_market_status_api(app)
+    logger.info(f"Market status: {'OPEN' if market_open else 'CLOSED'}")
+
+    # After market close: Save daily close prices
+    if should_save_daily_close():
+        logger.info("Market close window - saving daily close prices")
+        run_price_update(app, kind='DAILY', note='daily close')
+        logger.info("=" * 60)
+        logger.info("CRON: Completed successfully")
+        logger.info("=" * 60)
+        return
+
+    # During market hours: Intraday updates
+    if market_open or is_market_hours():
+        logger.info("Market hours - updating intraday prices")
+        run_price_update(app, kind='INTRADAY', note='intraday update')
+    else:
+        logger.info("Outside market hours - skipping price update")
 
     logger.info("=" * 60)
     logger.info("CRON: Completed successfully")

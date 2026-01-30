@@ -1,8 +1,6 @@
 # models.py
-"""
-Database models for portfolio tracking system.
-Enhanced with audit fields and validation from CSV logger approach.
-"""
+
+"""Database models for portfolio tracking."""
 
 from datetime import datetime, timezone
 from flask_sqlalchemy import SQLAlchemy
@@ -13,7 +11,7 @@ db = SQLAlchemy()
 
 
 class Price(db.Model):
-    """Historical stock prices with audit trail"""
+    """Historical stock prices."""
     __tablename__ = 'prices'
 
     id = db.Column(db.Integer, primary_key=True)
@@ -26,9 +24,9 @@ class Price(db.Model):
     low = db.Column(db.Numeric(10, 2))
     volume = db.Column(db.BigInteger)
 
-    # Audit fields from Daniel's CSV logger
-    kind = db.Column(db.String(20), default='HISTORY')  # HISTORY, SNAPSHOT, TRADE
-    price_source = db.Column(db.String(50), default='yfinance')  # yfinance, user, alpha_vantage
+    # Audit fields
+    kind = db.Column(db.String(20), default='HISTORY')
+    price_source = db.Column(db.String(50), default='yfinance')
     out_of_order = db.Column(db.Boolean, default=False)
     note = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
@@ -66,14 +64,14 @@ class Price(db.Model):
 
 
 class Trade(db.Model):
-    """Buy/Sell transactions with audit trail"""
+    """Buy/Sell transactions."""
     __tablename__ = 'trades'
 
     id = db.Column(db.Integer, primary_key=True)
     event_id = db.Column(db.String(16), unique=True, nullable=False, index=True)
     timestamp = db.Column(db.DateTime, nullable=False, index=True)
     ticker = db.Column(db.String(10), nullable=False, index=True)
-    action = db.Column(db.String(10), nullable=False)  # BUY, SELL
+    action = db.Column(db.String(10), nullable=False)
     quantity = db.Column(db.Integer, nullable=False)
     price = db.Column(db.Numeric(10, 2), nullable=False)
     total_cost = db.Column(db.Numeric(12, 2), nullable=False)
@@ -119,7 +117,7 @@ class Trade(db.Model):
 
 
 class Snapshot(db.Model):
-    """Portfolio state snapshots (taken manually or after trades)"""
+    """Portfolio state snapshots."""
     __tablename__ = 'snapshots'
 
     id = db.Column(db.Integer, primary_key=True)
@@ -160,7 +158,7 @@ class Snapshot(db.Model):
 
 
 class PortfolioConfig(db.Model):
-    """System configuration (key-value store)"""
+    """System configuration key-value store."""
     __tablename__ = 'portfolio_config'
 
     id = db.Column(db.Integer, primary_key=True)
