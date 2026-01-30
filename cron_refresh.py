@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 from app import create_app
 from models import db, Trade, Price, PortfolioConfig
+from constants import DEFAULT_BENCHMARK_TICKER, DEFAULT_LOOKBACK_DAYS
 
 # Configuration
 DAILY_BACKFILL_HOUR = int(os.environ.get('DAILY_BACKFILL_HOUR', 9))
@@ -149,8 +150,8 @@ def run_price_update(app, kind='INTRADAY', note='intraday update'):
             logger.info("No stocks to update.")
             return
 
-        if 'SPY' not in stocks:
-            stocks = stocks + ['SPY']
+        if DEFAULT_BENCHMARK_TICKER not in stocks:
+            stocks = stocks + [DEFAULT_BENCHMARK_TICKER]
 
         logger.info(f"Fetching prices for {len(stocks)} stocks...")
         prices = pm.provider.get_current_prices(stocks)
@@ -215,10 +216,11 @@ def run_full_backfill(app):
             logger.warning("No stocks to update. Add trades first.")
             return False
 
-        pm._last_backfill_ts = None
+        # Bypass cooldown for cron jobs by clearing last refresh timestamp
+        PortfolioConfig.set_value('last_refresh_ts', None)
 
         logger.info("Starting smart backfill...")
-        success, message = pm.manual_backfill(default_lookback_days=365)
+        success, message = pm.manual_backfill(default_lookback_days=DEFAULT_LOOKBACK_DAYS)
 
         if success:
             logger.info(f"Backfill completed: {message}")

@@ -1,4 +1,8 @@
 # routes/api.py
+"""
+API endpoints for portfolio data.
+Returns JSON responses for frontend consumption.
+"""
 
 import logging
 from functools import wraps
@@ -7,6 +11,12 @@ from flask_login import login_required
 from sqlalchemy import desc
 from models import db, Price, Trade, Snapshot
 from datetime import datetime, timedelta, timezone
+from extensions import limiter
+from constants import (
+    MAX_TIMELINE_DAYS, DEFAULT_TIMELINE_DAYS, DEFAULT_TRADE_LIMIT,
+    MAX_TRADE_LIMIT, MAX_TICKER_LENGTH, MAX_NOTE_LENGTH,
+    PUBLIC_API_RATE_LIMIT
+)
 
 logger = logging.getLogger(__name__)
 api_bp = Blueprint('api', __name__)
@@ -26,8 +36,10 @@ def api_error_handler(f):
 
 
 @api_bp.route('/portfolio')
+@limiter.limit(PUBLIC_API_RATE_LIMIT)
 @api_error_handler
 def get_portfolio():
+    """Get current portfolio statistics and holdings."""
     pm = current_app.portfolio_manager
     stats = pm.calculate_portfolio_stats()
 
@@ -57,6 +69,7 @@ def get_portfolio():
 @login_required
 @api_error_handler
 def manual_refresh():
+    """Trigger manual data refresh. Backfills price data and takes snapshot."""
     pm = current_app.portfolio_manager
     success, message = pm.manual_backfill(default_lookback_days=30)
 
@@ -77,6 +90,7 @@ def manual_refresh():
 @login_required
 @api_error_handler
 def take_snapshot():
+    """Take a manual snapshot of current portfolio state."""
     pm = current_app.portfolio_manager
     note = request.json.get('note', 'manual snapshot') if request.json else 'manual snapshot'
     result = pm.take_snapshot(note=note)
@@ -93,6 +107,7 @@ def take_snapshot():
 @login_required
 @api_error_handler
 def execute_trade():
+    """Execute a buy or sell trade."""
     data = request.get_json()
 
     required_fields = ['ticker', 'action', 'quantity', 'price']
@@ -104,7 +119,7 @@ def execute_trade():
     action = data['action'].upper()
     quantity = int(data['quantity'])
     price = float(data['price'])
-    note = data.get('note', '')[:1000]
+    note = data.get('note', '')[:MAX_NOTE_LENGTH]
 
     trade_date = None
     if 'date' in data and data['date']:
@@ -114,7 +129,7 @@ def execute_trade():
         except ValueError:
             return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
 
-    if not ticker or len(ticker) > 12:
+    if not ticker or len(ticker) > MAX_TICKER_LENGTH:
         return jsonify({'error': f'Invalid ticker format: {ticker}'}), 400
 
     if action not in ['BUY', 'SELL']:
@@ -160,17 +175,23 @@ def execute_trade():
 
 
 @api_bp.route('/trades')
+@limiter.limit(PUBLIC_API_RATE_LIMIT)
 @api_error_handler
 def get_trades():
-    limit = request.args.get('limit', 20, type=int)
+    """Get recent trades with optional limit parameter."""
+    limit = request.args.get('limit', DEFAULT_TRADE_LIMIT, type=int)
+    limit = min(max(1, limit), MAX_TRADE_LIMIT)  # Clamp between 1 and MAX_TRADE_LIMIT
     trades = Trade.query.order_by(desc(Trade.timestamp)).limit(limit).all()
     return jsonify({'trades': [trade.to_dict() for trade in trades], 'count': len(trades)})
 
 
 @api_bp.route('/timeline')
+@limiter.limit(PUBLIC_API_RATE_LIMIT)
 @api_error_handler
 def get_timeline():
-    days = request.args.get('days', 90, type=int)
+    """Get portfolio value over time with optional benchmark comparison."""
+    days = request.args.get('days', DEFAULT_TIMELINE_DAYS, type=int)
+    days = min(max(1, days), MAX_TIMELINE_DAYS)  # Clamp between 1 and MAX_TIMELINE_DAYS
     include_benchmark = request.args.get('include_benchmark', 'false').lower() == 'true'
     pm = current_app.portfolio_manager
 
@@ -183,8 +204,10 @@ def get_timeline():
 
 
 @api_bp.route('/performance')
+@limiter.limit(PUBLIC_API_RATE_LIMIT)
 @api_error_handler
 def get_performance():
+    """Get performance metrics including volatility, Sharpe ratio, and best/worst stocks."""
     pm = current_app.portfolio_manager
     metrics = pm.calculate_performance_metrics()
     best_stock, worst_stock = pm.get_best_worst_stocks()
@@ -201,9 +224,12 @@ def get_performance():
 
 
 @api_bp.route('/prices/<ticker>')
+@limiter.limit(PUBLIC_API_RATE_LIMIT)
 @api_error_handler
 def get_stock_prices(ticker):
-    days = request.args.get('days', 90, type=int)
+    """Get price history for a specific stock."""
+    days = request.args.get('days', DEFAULT_TIMELINE_DAYS, type=int)
+    days = min(max(1, days), MAX_TIMELINE_DAYS)  # Clamp between 1 and MAX_TIMELINE_DAYS
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
     prices = Price.query.filter(
@@ -219,9 +245,12 @@ def get_stock_prices(ticker):
 
 
 @api_bp.route('/stocks')
+@limiter.limit(PUBLIC_API_RATE_LIMIT)
 @api_error_handler
 def get_all_stocks():
-    days = request.args.get('days', 90, type=int)
+    """Get price history for all tracked stocks."""
+    days = request.args.get('days', DEFAULT_TIMELINE_DAYS, type=int)
+    days = min(max(1, days), MAX_TIMELINE_DAYS)  # Clamp between 1 and MAX_TIMELINE_DAYS
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     stocks_data = {}
 
@@ -243,6 +272,7 @@ def get_all_stocks():
 @login_required
 @api_error_handler
 def get_stats():
+    """Get database statistics. Requires authentication."""
     pm = current_app.portfolio_manager
     cash = pm.get_cash_balance()
     positions = pm.get_current_positions()
@@ -263,8 +293,10 @@ def get_stats():
 
 
 @api_bp.route('/market-status')
+@limiter.limit(PUBLIC_API_RATE_LIMIT)
 @api_error_handler
 def get_market_status():
+    """Get market open/closed status."""
     pm = current_app.portfolio_manager
     market_open = None
     try:
@@ -278,6 +310,7 @@ def get_market_status():
 @login_required
 @api_error_handler
 def get_provider_status():
+    """Get current price provider status and quota info. Requires authentication."""
     pm = current_app.portfolio_manager
     provider = pm.provider
 
@@ -302,6 +335,7 @@ def get_provider_status():
 @login_required
 @api_error_handler
 def reset_database():
+    """Reset the entire database. Drops all tables and recreates them. Requires authentication."""
     db.drop_all()
     db.create_all()
     pm = current_app.portfolio_manager
@@ -311,11 +345,15 @@ def reset_database():
 
 @api_bp.route('/health')
 def health_check():
+    """Health check endpoint for deployment platforms."""
     return jsonify({'status': 'ok', 'timestamp': datetime.now(timezone.utc).isoformat()})
 
 
 @api_bp.route('/settings')
+@login_required
+@api_error_handler
 def get_settings():
+    """Get application settings. Requires authentication."""
     import os
     fake_ticker = os.environ.get('FAKE_LIVE_TICKER', 'false').lower() == 'true'
     return jsonify({'fake_live_ticker': fake_ticker})
