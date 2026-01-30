@@ -55,7 +55,7 @@ class TestTradeValidation:
         with app.app_context():
             pm = app.portfolio_manager
 
-            with pytest.raises(ValueError, match="position_after cannot be negative"):
+            with pytest.raises(ValueError, match="position cannot go negative"):
                 pm.record_trade(
                     ticker='AAPL',
                     action='SELL',
@@ -68,7 +68,7 @@ class TestTradeValidation:
         with app.app_context():
             pm = app.portfolio_manager
 
-            with pytest.raises(ValueError, match="cash_after cannot be negative"):
+            with pytest.raises(ValueError, match="Insufficient cash"):
                 pm.record_trade(
                     ticker='AAPL',
                     action='BUY',
@@ -94,7 +94,7 @@ class TestTradeValidation:
         with app.app_context():
             pm = app.portfolio_manager
 
-            with pytest.raises(ValueError, match="qty must be >0"):
+            with pytest.raises(ValueError, match="quantity must be positive"):
                 pm.record_trade(
                     ticker='AAPL',
                     action='BUY',

@@ -1,8 +1,4 @@
 # providers/alphavantage_provider.py
-"""
-Alpha Vantage price data provider.
-Official API with reliable rate limits.
-"""
 
 import json
 import logging
@@ -16,31 +12,20 @@ logger = logging.getLogger(__name__)
 
 
 class AlphaVantageError(Exception):
-    """Base exception for Alpha Vantage errors"""
     pass
 
 
 class AlphaVantageQuotaError(AlphaVantageError):
-    """Raised when quota is exceeded"""
     def __init__(self, message: str, retry_after: Optional[int] = None):
         super().__init__(message)
         self.retry_after = retry_after
 
 
 class AlphaVantageInvalidKeyError(AlphaVantageError):
-    """Raised when API key is invalid"""
     pass
 
 
 class AlphaVantageProvider:
-    """
-    Alpha Vantage API price provider.
-
-    Rate Limits:
-    - Free: 5 calls/min, 500 calls/day
-    - Paid ($49.99/mo): 75 calls/min, unlimited daily
-    """
-
     def __init__(self, config: Dict):
         self.config = config
         self.max_retries = config.get('max_retries', 3)
@@ -51,41 +36,35 @@ class AlphaVantageProvider:
             raise ValueError("Alpha Vantage API key is required")
 
         self.base_url = "https://www.alphavantage.co/query"
-        self.rate_limit_delay = config.get('rate_limit_delay', 12)  # 12s = 5 req/min for free tier
+        self.rate_limit_delay = config.get('rate_limit_delay', 12)
         self.is_paid_tier = config.get('is_paid_tier', False)
 
-        # Quota tracking
         self._daily_calls = 0
         self._daily_reset = datetime.now(timezone.utc).date()
         self._minute_calls: List[datetime] = []
         self._last_successful_call: Optional[datetime] = None
 
-        # Set limits based on tier
         if self.is_paid_tier:
-            self.rate_limit_delay = 1  # Paid tier: 75 req/min = ~0.8s, use 1s to be safe
-            self._daily_limit = float('inf')  # Unlimited
+            self.rate_limit_delay = 1
+            self._daily_limit = float('inf')
             self._minute_limit = 75
-            logger.info(f"Initialized Alpha Vantage provider (PAID tier, {self.rate_limit_delay}s delay)")
+            logger.info(f"Alpha Vantage provider initialized (PAID tier)")
         else:
             self._daily_limit = 500
             self._minute_limit = 5
-            logger.info(f"Initialized Alpha Vantage provider (FREE tier, {self.rate_limit_delay}s delay)")
-            logger.warning(f"Free tier limited to {self._minute_limit} req/min, {self._daily_limit} req/day")
+            logger.info(f"Alpha Vantage provider initialized (FREE tier)")
 
     def get_provider_name(self) -> str:
         tier = "PAID" if self.is_paid_tier else "FREE"
         return f"AlphaVantage ({tier})"
 
     def get_quota_status(self) -> Dict:
-        """Get current quota usage status"""
         now = datetime.now(timezone.utc)
 
-        # Reset daily counter at midnight UTC
         if now.date() > self._daily_reset:
             self._daily_calls = 0
             self._daily_reset = now.date()
 
-        # Clean minute window
         one_minute_ago = now - timedelta(minutes=1)
         self._minute_calls = [t for t in self._minute_calls if t > one_minute_ago]
 
@@ -101,26 +80,21 @@ class AlphaVantageProvider:
         }
 
     def _check_quota(self) -> None:
-        """Check if we're within rate limits. Raises AlphaVantageQuotaError if exceeded."""
         now = datetime.now(timezone.utc)
 
-        # Reset daily counter at midnight UTC
         if now.date() > self._daily_reset:
             self._daily_calls = 0
             self._daily_reset = now.date()
 
-        # Clean minute window
         one_minute_ago = now - timedelta(minutes=1)
         self._minute_calls = [t for t in self._minute_calls if t > one_minute_ago]
 
-        # Check daily limit
         if self._daily_limit != float('inf') and self._daily_calls >= self._daily_limit:
             raise AlphaVantageQuotaError(
-                f"Daily quota exceeded ({int(self._daily_limit)} calls). Try again tomorrow.",
-                retry_after=86400  # 24 hours
+                f"Daily quota exceeded ({int(self._daily_limit)} calls)",
+                retry_after=86400
             )
 
-        # Check minute limit
         if len(self._minute_calls) >= self._minute_limit:
             wait_time = 60 - int((now - self._minute_calls[0]).total_seconds())
             raise AlphaVantageQuotaError(
@@ -129,119 +103,74 @@ class AlphaVantageProvider:
             )
 
     def _record_call(self) -> None:
-        """Record an API call for quota tracking"""
         now = datetime.now(timezone.utc)
         self._daily_calls += 1
         self._minute_calls.append(now)
         self._last_successful_call = now
 
     def is_market_open(self) -> bool:
-        """
-        Check market status using Alpha Vantage MARKET_STATUS endpoint.
-        Free endpoint, doesn't count against quota.
-        """
         try:
-            params = {
-                'function': 'MARKET_STATUS',
-                'apikey': self.api_key
-            }
-
+            params = {'function': 'MARKET_STATUS', 'apikey': self.api_key}
             response = requests.get(self.base_url, params=params, timeout=10)
             response.raise_for_status()
             data = response.json()
 
-            # Check if US market is open
             if 'markets' in data:
                 for market in data['markets']:
                     if market.get('region') == 'United States' and market.get('primary_exchanges'):
                         if market.get('current_status') == 'open':
                             return True
-
             return False
-
         except Exception as e:
             logger.warning(f"Could not check market status: {e}")
-            return True  # Assume open if can't check
+            return True
 
     def _make_request(self, params: Dict) -> Dict:
-        """
-        Make API request with rate limiting, quota tracking, and error handling.
-        """
-        # Check quota before making request
         self._check_quota()
-
         params['apikey'] = self.api_key
 
         for attempt in range(self.max_retries):
             try:
                 if attempt > 0:
                     wait_time = self.retry_delay * (2 ** attempt)
-                    logger.info(f"Retry attempt {attempt + 1}/{self.max_retries} after {wait_time}s...")
+                    logger.info(f"Retry {attempt + 1}/{self.max_retries} after {wait_time}s...")
                     time.sleep(wait_time)
 
                 response = requests.get(self.base_url, params=params, timeout=30)
                 response.raise_for_status()
                 data = response.json()
 
-                # Check for API error messages
                 if 'Error Message' in data:
                     msg = data['Error Message']
-                    if 'Invalid API call' in msg or 'invalid' in msg.lower():
-                        raise AlphaVantageError(f"Invalid API call: {msg}")
                     if 'api key' in msg.lower():
                         raise AlphaVantageInvalidKeyError("Invalid Alpha Vantage API key")
                     raise AlphaVantageError(f"API Error: {msg}")
 
                 if 'Note' in data:
                     note = data['Note']
-                    # Rate limit message
                     if 'API call frequency' in note:
-                        raise AlphaVantageQuotaError(
-                            f"Rate limit exceeded (5 calls/minute for free tier)",
-                            retry_after=60
-                        )
+                        raise AlphaVantageQuotaError("Rate limit exceeded", retry_after=60)
                     elif 'premium' in note.lower() or 'upgrade' in note.lower():
-                        raise AlphaVantageQuotaError(
-                            "Daily quota exhausted. Upgrade to premium or wait until tomorrow.",
-                            retry_after=86400
-                        )
-                    else:
-                        logger.info(f"API Note: {note}")
+                        raise AlphaVantageQuotaError("Daily quota exhausted", retry_after=86400)
 
-                # Record successful call for quota tracking
                 self._record_call()
-
-                # Add rate limit delay
                 time.sleep(self.rate_limit_delay)
-
                 return data
 
             except requests.exceptions.HTTPError as e:
                 if e.response.status_code == 429:
-                    raise AlphaVantageQuotaError(
-                        "Alpha Vantage rate limit exceeded (HTTP 429)",
-                        retry_after=60
-                    )
-                else:
-                    raise
+                    raise AlphaVantageQuotaError("HTTP 429 rate limit", retry_after=60)
+                raise
             except (AlphaVantageQuotaError, AlphaVantageInvalidKeyError):
-                # Don't retry quota or auth errors
                 raise
             except (requests.RequestException, ValueError, KeyError, json.JSONDecodeError) as e:
-                # Retry on network errors, parsing errors
                 logger.warning(f"Request failed (attempt {attempt + 1}): {e}")
-                if attempt < self.max_retries - 1:
-                    continue
-                else:
+                if attempt >= self.max_retries - 1:
                     raise
 
         raise ConnectionError(f"Failed after {self.max_retries} attempts")
 
     def get_current_prices(self, tickers: List[str]) -> Dict[str, float]:
-        """
-        Get current prices using GLOBAL_QUOTE endpoint.
-        Each ticker requires 1 API call.
-        """
         tickers = self._validate_tickers(tickers)
         prices = {}
 
@@ -249,26 +178,16 @@ class AlphaVantageProvider:
 
         for ticker in tickers:
             try:
-                params = {
-                    'function': 'GLOBAL_QUOTE',
-                    'symbol': ticker
-                }
-
-                data = self._make_request(params)
+                data = self._make_request({'function': 'GLOBAL_QUOTE', 'symbol': ticker})
 
                 if 'Global Quote' in data and data['Global Quote']:
                     quote = data['Global Quote']
-
-                    # Alpha Vantage returns price as string
-                    price_str = quote.get('05. price', '0')
-                    price = float(price_str)
-
+                    price = float(quote.get('05. price', '0'))
                     self._assert_price(price, ticker, "get_current_prices")
                     prices[ticker] = price
-
                     logger.debug(f"{ticker}: ${price:.2f}")
                 else:
-                    logger.warning(f"{ticker}: No quote data returned")
+                    logger.warning(f"{ticker}: No quote data")
                     prices[ticker] = None
 
             except Exception as e:
@@ -277,52 +196,36 @@ class AlphaVantageProvider:
 
         return prices
 
-    def get_historical_prices(
-            self,
-            ticker: str,
-            start_date: date,
-            end_date: date
-    ) -> pd.DataFrame:
-        """
-        Get historical daily prices using TIME_SERIES_DAILY endpoint.
-        Returns up to 100 days (compact) or 20+ years (full).
-        """
+    def get_historical_prices(self, ticker: str, start_date: date, end_date: date) -> pd.DataFrame:
         ticker = self._validate_tickers([ticker])[0]
 
-        # Validate dates
         self._assert_date(datetime.combine(start_date, datetime.min.time()), ticker, "start_date")
         self._assert_date(datetime.combine(end_date, datetime.min.time()), ticker, "end_date")
 
         if start_date > end_date:
-            raise ValueError(f"start_date ({start_date}) cannot be after end_date ({end_date})")
+            raise ValueError(f"start_date ({start_date}) after end_date ({end_date})")
 
-        # Determine outputsize
         days_requested = (end_date - start_date).days
         outputsize = 'full' if days_requested > 100 else 'compact'
 
         logger.info(f"Fetching {ticker} history ({start_date} to {end_date}, {outputsize})...")
 
         try:
-            params = {
+            data = self._make_request({
                 'function': 'TIME_SERIES_DAILY',
                 'symbol': ticker,
                 'outputsize': outputsize
-            }
-
-            data = self._make_request(params)
+            })
 
             if 'Time Series (Daily)' not in data:
                 logger.warning(f"No time series data for {ticker}")
                 return pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
 
             time_series = data['Time Series (Daily)']
-
-            # Convert to DataFrame
             rows = []
+
             for date_str, values in time_series.items():
                 ts = datetime.strptime(date_str, '%Y-%m-%d').replace(tzinfo=timezone.utc)
-
-                # Filter by date range
                 if start_date <= ts.date() <= end_date:
                     rows.append({
                         'timestamp': ts,
@@ -337,26 +240,17 @@ class AlphaVantageProvider:
                 logger.warning("No data in requested date range")
                 return pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
 
-            df = pd.DataFrame(rows)
-            df = df.sort_values('timestamp').reset_index(drop=True)
-
-            # Validate all data
+            df = pd.DataFrame(rows).sort_values('timestamp').reset_index(drop=True)
             df = self.validate_price_data(df, ticker)
 
             logger.info(f"Retrieved {len(df)} days of data for {ticker}")
-
             return df
 
         except Exception as e:
             logger.error(f"Error fetching {ticker}: {e}")
             raise
 
-    # ========================================
-    # VALIDATION METHODS
-    # ========================================
-
     def _validate_tickers(self, tickers: List[str]) -> List[str]:
-        """Validate and clean ticker list"""
         if not isinstance(tickers, list) or not tickers:
             raise ValueError("tickers must be a non-empty list")
         clean = []
@@ -367,7 +261,6 @@ class AlphaVantageProvider:
         return list(dict.fromkeys(clean))
 
     def _assert_price(self, price: float, ticker: str, context: str) -> None:
-        """Validate stock price"""
         if pd.isna(price):
             raise ValueError(f"[{ticker}] price is NaN in {context}")
         try:
@@ -378,7 +271,6 @@ class AlphaVantageProvider:
             raise ValueError(f"[{ticker}] price must be > 0 in {context}")
 
     def _assert_volume(self, volume: int, ticker: str, context: str) -> None:
-        """Validate trading volume"""
         if pd.isna(volume):
             raise ValueError(f"[{ticker}] volume is NaN in {context}")
         try:
@@ -389,16 +281,13 @@ class AlphaVantageProvider:
             raise ValueError(f"[{ticker}] volume cannot be negative in {context}")
 
     def _assert_date(self, dt: datetime, ticker: str, context: str) -> None:
-        """Validate date/timestamp"""
         if not isinstance(dt, (datetime, date)):
             raise ValueError(f"[{ticker}] invalid date type in {context}")
         now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
         if dt > now + timedelta(days=1):
-            # TODO: Eventually remove the +timedelta(days=1) tolerance - keeping for now for timezone edge cases
             raise ValueError(f"[{ticker}] date cannot be in future in {context}")
 
     def validate_price_data(self, df: pd.DataFrame, ticker: str) -> pd.DataFrame:
-        """Validate DataFrame of historical prices"""
         required_cols = ['timestamp', 'close']
         for col in required_cols:
             if col not in df.columns:
