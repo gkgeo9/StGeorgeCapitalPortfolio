@@ -25,12 +25,12 @@
         <header class="header">
             <h1>St. George Capital Portfolio</h1>
             <p class="last-update">Last updated: <span id="last-update-time">Loading...</span></p>
-            <div style="display: flex; align-items: center; justify-content: center; gap: 15px; margin-top: 16px;">
+            <div class="header-controls">
                 <button onclick="toggleTheme()" class="theme-toggle" id="theme-toggle" title="Toggle theme">
                     <span id="theme-icon">&#9790;</span>
                 </button>
-                <span id="quota-status" style="font-size: 12px; color: #64748b;"></span>
-                <span id="loading-spinner" class="loading-spinner" style="display: none;" title="Loading..."></span>
+                <span id="quota-status" class="quota-status"></span>
+                <span id="loading-spinner" class="loading-spinner hidden" title="Loading..."></span>
             </div>
         </header>
 
@@ -47,7 +47,7 @@
         </div>
 
         <!-- Error message -->
-        <div id="error-message" class="error-message" style="display: none;">
+        <div id="error-message" class="error-message hidden">
             <span class="error-icon">⚠️</span>
             <span id="error-text"></span>
         </div>
@@ -88,7 +88,7 @@
                     <!-- Holdings table will be inserted here -->
                 </div>
 
-                <h3 style="margin-top: 32px;">Recent Activity</h3>
+                <h3 class="section-header">Recent Activity</h3>
                 <div id="recent-trades-container">
                     <!-- Recent trades will be inserted here -->
                 </div>
@@ -101,7 +101,7 @@
                 <div class="chart-header">
                     <h3>Portfolio Value Over Time</h3>
                     <div class="chart-controls">
-                        <button id="chart-mode-toggle" class="chart-toggle-btn" onclick="toggleChartMode()">
+                        <button id="chart-mode-toggle" class="chart-toggle-btn" onclick="toggleChartMode('timeline')">
                             <span id="mode-icon">$</span>
                             <span id="mode-text">Show %</span>
                         </button>
@@ -117,7 +117,7 @@
                 <div class="chart-header">
                     <h3>Stock Prices</h3>
                     <div class="chart-controls">
-                        <button id="stock-chart-mode-toggle" class="chart-toggle-btn" onclick="toggleStockChartMode()">
+                        <button id="stock-chart-mode-toggle" class="chart-toggle-btn" onclick="toggleChartMode('stocks')">
                             <span id="stock-mode-icon">$</span>
                             <span id="stock-mode-text">Show %</span>
                         </button>
@@ -129,7 +129,7 @@
 
         <!-- Footer -->
         <footer class="footer">
-            <p>Investment Club Dashboard • Manual refresh mode (data updates on button click)</p>
+            <p>SGC Investment Club Dashboard</p>
             <p>
                 <a href="/api/stats" target="_blank">View API Stats</a>
                 {% if is_admin %}
@@ -142,12 +142,9 @@
     </div>
 
     {% if is_admin %}
-    <!-- Floating Trade Button (admin only) -->
-    <div
-        style="position: fixed; bottom: 30px; right: 30px; display: flex; flex-direction: column; align-items: center; gap: 15px; z-index: 1000;">
-        <button class="admin-trade-btn" id="reset-btn" onclick="resetDatabase()"
-            style="background: #e74c3c; width: 50px; height: 50px; font-size: 20px; position: static;">🗑️</button>
-        <button class="admin-trade-btn" id="trade-btn" onclick="openTradeModal()" style="position: static;">$</button>
+    <div class="floating-actions">
+        <button class="admin-trade-btn admin-trade-btn--danger" id="reset-btn" onclick="resetDatabase()">🗑️</button>
+        <button class="admin-trade-btn" id="trade-btn" onclick="openTradeModal()">$</button>
     </div>
 
     <!-- Trade Modal -->
@@ -158,10 +155,9 @@
             <form id="trade-form">
                 <div class="form-group">
                     <label for="stock-select">Stock Ticker</label>
-                    <div style="display: flex; gap: 10px;">
-                        <input type="text" id="stock-select" list="stock-suggestions" placeholder="e.g. SHOP" required
-                            style="text-transform: uppercase; flex: 2;">
-                        <select id="exchange-select" style="flex: 1;">
+                    <div class="ticker-input-row">
+                        <input type="text" id="stock-select" list="stock-suggestions" placeholder="e.g. SHOP" required class="ticker-input">
+                        <select id="exchange-select" class="exchange-select">
                             <option value="US">US (NYSE/NAS)</option>
                             <option value="TRT">Canada (TSX)</option>
                             <option value="TRV">Canada (TSX-V)</option>
@@ -184,7 +180,7 @@
                 <div class="form-group">
                     <label for="price-input">Price per Share ($)</label>
                     <input type="number" id="price-input" step="0.01" min="0.01" required>
-                    <div class="price-info" id="current-price-info" style="display: none;">
+                    <div class="price-info hidden" id="current-price-info">
                         Current market price: <strong id="market-price">--</strong>
                     </div>
                 </div>
@@ -208,167 +204,7 @@
     <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 
     {% if is_admin %}
-    <!-- Admin-only JavaScript (trade and reset functions) -->
-    <script>
-        // Store current prices globally
-        let currentPrices = {};
-
-        // Update the loadPortfolio function to store prices
-        const originalLoadPortfolio = loadPortfolio;
-        loadPortfolio = async function () {
-            await originalLoadPortfolio();
-
-            // Fetch and store current prices
-            try {
-                const response = await fetch('/api/portfolio');
-                const data = await response.json();
-
-                data.holdings.forEach(h => {
-                    currentPrices[h.ticker] = h.price;
-                });
-            } catch (error) {
-                console.error('Error loading prices:', error);
-            }
-        };
-
-        function openTradeModal() {
-            // Set default date to today
-            document.getElementById('trade-date').valueAsDate = new Date();
-            document.getElementById('trade-modal').style.display = 'flex';
-        }
-
-        function closeTradeModal() {
-            document.getElementById('trade-modal').style.display = 'none';
-            document.getElementById('trade-form').reset();
-            document.getElementById('current-price-info').style.display = 'none';
-        }
-
-        // Update price when stock is selected
-        document.getElementById('stock-select').addEventListener('change', function (e) {
-            let ticker = e.target.value.toUpperCase().trim();
-            const exchange = document.getElementById('exchange-select').value;
-            let lookupTicker = ticker;
-            if (exchange !== 'US' && !ticker.includes('.')) {
-                lookupTicker = `${ticker}.${exchange}`;
-            }
-
-            const priceInput = document.getElementById('price-input');
-            const priceInfo = document.getElementById('current-price-info');
-            const marketPrice = document.getElementById('market-price');
-
-            // Check exact first, then suffixed
-            let foundPrice = currentPrices[ticker] || currentPrices[lookupTicker];
-
-            if (foundPrice) {
-                priceInput.value = foundPrice.toFixed(2);
-                marketPrice.textContent = `$${foundPrice.toFixed(2)}`;
-                priceInfo.style.display = 'block';
-            } else {
-                priceInfo.style.display = 'none';
-            }
-        });
-
-        // Also listen to exchange change to update price
-        document.getElementById('exchange-select').addEventListener('change', function (e) {
-            // Trigger stock select change event logic
-            document.getElementById('stock-select').dispatchEvent(new Event('change'));
-        });
-
-        async function executeTrade(action) {
-            let ticker = document.getElementById('stock-select').value.toUpperCase().trim();
-            const exchange = document.getElementById('exchange-select').value;
-            const quantity = parseInt(document.getElementById('quantity-input').value);
-            const price = parseFloat(document.getElementById('price-input').value);
-            const date = document.getElementById('trade-date').value;
-            const note = document.getElementById('note-input').value;
-
-            if (!ticker || !quantity || !price || !date) {
-                showError('Please fill in all required fields');
-                return;
-            }
-
-            // Append suffix if not US
-            // Also logic to prevent double suffixing if user typed valid suffix
-            if (exchange !== 'US') {
-                if (!ticker.includes('.')) {
-                    ticker = `${ticker}.${exchange}`;
-                }
-            }
-
-            showLoading(true);
-
-            try {
-                const response = await fetch('/api/trade', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        ticker: ticker,
-                        action: action,
-                        quantity: quantity,
-                        price: price,
-                        date: date,
-                        note: note || `${action} trade via dashboard`
-                    })
-                });
-
-                const data = await response.json();
-
-                if (response.ok) {
-                    showSuccess(`${action} ${quantity} ${ticker} @ $${price.toFixed(2)} = $${(quantity * price).toFixed(2)}`);
-                    closeTradeModal();
-
-                    // Refresh all data after 1 second
-                    setTimeout(() => {
-                        loadAllData();
-                    }, 1000);
-                } else {
-                    showError(data.error || 'Trade failed');
-                }
-
-            } catch (error) {
-                console.error('Error executing trade:', error);
-                showError('Failed to execute trade: ' + error.message);
-            } finally {
-                showLoading(false);
-            }
-        }
-
-        // Close modal when clicking outside
-        document.getElementById('trade-modal').addEventListener('click', function (e) {
-            if (e.target === this) {
-                closeTradeModal();
-            }
-        });
-
-        async function resetDatabase() {
-            if (!confirm("WARNING: This will delete ALL data!\nAre you ABSOLUTELY sure? This action cannot be undone.")) {
-                return;
-            }
-
-            showLoading(true);
-
-            try {
-                const response = await fetch('/api/reset_db', {
-                    method: 'POST'
-                });
-                const data = await response.json();
-
-                if (response.ok) {
-                    alert("Database reset successfully.");
-                    location.reload();
-                } else {
-                    showError(data.error || "Reset failed");
-                }
-            } catch (error) {
-                console.error('Error resetting DB:', error);
-                showError('Failed to reset DB: ' + error.message);
-            } finally {
-                showLoading(false);
-            }
-        }
-    </script>
+    <script src="{{ url_for('static', filename='js/admin.js') }}"></script>
     {% endif %}
 </body>
 

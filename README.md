@@ -74,49 +74,58 @@ Protected endpoints require admin login at `/login`:
 
 ### Public (No Login Required)
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/portfolio` | GET | Current holdings and stats |
-| `/api/timeline` | GET | Portfolio value over time |
-| `/api/performance` | GET | Sharpe ratio, volatility |
-| `/api/trades` | GET | Recent trade history |
-| `/api/stocks` | GET | Historical stock prices |
-| `/api/market-status` | GET | Market open/closed status |
-| `/health` | GET | Health check |
+| Endpoint             | Method | Description                |
+| -------------------- | ------ | -------------------------- |
+| `/api/portfolio`     | GET    | Current holdings and stats |
+| `/api/timeline`      | GET    | Portfolio value over time  |
+| `/api/performance`   | GET    | Sharpe ratio, volatility   |
+| `/api/trades`        | GET    | Recent trade history       |
+| `/api/stocks`        | GET    | Historical stock prices    |
+| `/api/market-status` | GET    | Market open/closed status  |
+| `/health`            | GET    | Health check               |
 
 ### Protected (Login Required)
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/trade` | POST | Execute buy/sell |
-| `/api/refresh` | POST | Fetch latest prices |
-| `/api/snapshot` | POST | Take portfolio snapshot |
-| `/api/reset_db` | POST | Reset database |
-| `/api/provider-status` | GET | API quota and provider info |
-| `/api/stats` | GET | Database statistics |
+| Endpoint               | Method | Description                 |
+| ---------------------- | ------ | --------------------------- |
+| `/api/trade`           | POST   | Execute buy/sell            |
+| `/api/refresh`         | POST   | Fetch latest prices         |
+| `/api/snapshot`        | POST   | Take portfolio snapshot     |
+| `/api/reset_db`        | POST   | Reset database              |
+| `/api/provider-status` | GET    | API quota and provider info |
+| `/api/stats`           | GET    | Database statistics         |
 
 ## Project Structure
 
 ```
 ├── app.py                  # Flask application factory
-├── portfolio_manager.py    # Core business logic
-├── models.py               # SQLAlchemy models
-├── config.py               # Configuration
+├── portfolio_manager.py    # Core portfolio facade
+├── models.py               # SQLAlchemy models (Price, Trade, Snapshot, PortfolioConfig)
+├── config.py               # Configuration management
 ├── auth.py                 # Authentication module
 ├── extensions.py           # Flask extensions (CSRF, rate limiting)
+├── constants.py            # Application constants and limits
 ├── cron_refresh.py         # Scheduled data refresh script
+├── wsgi.py                 # WSGI entry point for gunicorn
 ├── routes/
 │   ├── api.py              # REST API endpoints
 │   └── views.py            # HTML routes
+├── services/
+│   ├── trade_service.py    # Trade execution and position tracking
+│   ├── price_service.py    # Price fetching and caching
+│   ├── snapshot_service.py # Portfolio snapshot creation
+│   └── analytics_service.py # Performance metrics and analytics
 ├── providers/
-│   └── alphavantage_provider.py  # Price data provider
+│   └── alphavantage_provider.py  # Alpha Vantage API integration
 ├── templates/
 │   ├── dashboard.html      # Main dashboard
 │   └── login.html          # Login page
 ├── static/
-│   ├── js/dashboard.js     # Frontend logic
+│   ├── js/
+│   │   ├── dashboard.js    # Frontend logic
+│   │   └── admin.js        # Admin-only trade execution
 │   └── css/dashboard.css   # Styling
-└── tests/                  # Test suite (68 tests)
+└── tests/                  # Test suite (99 tests)
 ```
 
 ## Running Tests
@@ -127,25 +136,28 @@ pytest tests/ -v
 
 ## Environment Variables
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `ALPHA_VANTAGE_API_KEY` | Yes | - | Alpha Vantage API key |
-| `ADMIN_USERNAME` | Yes | admin | Admin login username |
-| `ADMIN_PASSWORD_HASH` | Yes | - | Bcrypt password hash |
-| `DATABASE_URL` | No | sqlite:///portfolio.db | Database connection |
-| `FRED_API_KEY` | No | - | FRED API for risk-free rate |
-| `SECRET_KEY` | Prod | auto-generated | Flask session secret |
-| `FLASK_ENV` | No | development | Environment mode |
-| `ALPHA_VANTAGE_PAID_TIER` | No | false | Enable paid tier rate limits |
-| `MANUAL_REFRESH_COOLDOWN` | No | 60 | Seconds between refreshes |
+| Variable                  | Required | Default                | Description                                     |
+| ------------------------- | -------- | ---------------------- | ----------------------------------------------- |
+| `ALPHA_VANTAGE_API_KEY`   | Yes      | -                      | Alpha Vantage API key                           |
+| `ADMIN_USERNAME`          | Yes      | admin                  | Admin login username                            |
+| `ADMIN_PASSWORD_HASH`     | Yes      | -                      | Bcrypt password hash                            |
+| `DATABASE_URL`            | No       | sqlite:///portfolio.db | Database connection                             |
+| `DATABASE_PUBLIC_URL`     | No       | -                      | Public DB URL for Railway cron jobs             |
+| `FRED_API_KEY`            | No       | -                      | FRED API for risk-free rate                     |
+| `SECRET_KEY`              | Prod     | auto-generated         | Flask session secret                            |
+| `FLASK_ENV`               | No       | development            | Environment mode                                |
+| `PORT`                    | No       | 5012                   | Server port                                     |
+| `ALPHA_VANTAGE_PAID_TIER` | No       | false                  | Enable paid tier rate limits                    |
+| `MANUAL_REFRESH_COOLDOWN` | No       | 60                     | Seconds between refreshes                       |
+| `FAKE_LIVE_TICKER`        | No       | false                  | Enable simulated live price updates (demo only) |
 
 ## Alpha Vantage API Tiers
 
-| Feature | Free | Paid ($49.99/mo) |
-|---------|------|------------------|
-| Calls/minute | 5 | 75 |
-| Calls/day | 500 | Unlimited |
-| Delay between calls | 12s | 1s |
+| Feature             | Free | Paid ($49.99/mo) |
+| ------------------- | ---- | ---------------- |
+| Calls/minute        | 5    | 75               |
+| Calls/day           | 500  | Unlimited        |
+| Delay between calls | 12s  | 1s               |
 
 Set `ALPHA_VANTAGE_PAID_TIER=true` in your `.env` for paid tier.
 
@@ -182,10 +194,7 @@ python cron_refresh.py
 ```
 
 The cron job:
+
 - Runs full backfill daily at 9 AM UTC
 - Updates risk-free rate from FRED weekly (Mondays)
 - Quick price updates on other runs
-
-## License
-
-MIT
